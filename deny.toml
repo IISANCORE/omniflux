@@ -1,0 +1,36 @@
+# cargo-deny configuration — Law 4 (dependencies are a public trust).
+# Every section states WHY it exists. Kept minimal on purpose: rules we
+# don't need are worse than none, because nobody reads them.
+
+[advisories]
+# Known vulnerabilities in the dependency tree fail the check (and CI).
+# This is the machine-enforced half of Law 4's "audit blocks merges".
+version = 2
+
+[licenses]
+# Dependency licenses the engine may lawfully consume (mainstream FOSS).
+# The LIST grows by editing this file, with a comment, never by magic.
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "BSL-1.0",
+]
+# NOTE: until there are external dependencies every entry above is
+# "unused" — cargo-deny warns about that per run; the warnings stay ON,
+# they are the reminder that this list exists for a future state.
+
+# The engine's own licensing is an OPEN decision (planning vault Task
+# Note, 2026-11-09) — no placeholder license is recorded anywhere.
+# Workspace members are marked `publish = false` until it is made, and
+# license checks skip unpublished members. When the decision lands: the
+# real license goes into the Cargo.tomls and `[licenses.private]` ignore
+# flips off again, resuming full checking of our own crates.
+[licenses.private]
+ignore = true

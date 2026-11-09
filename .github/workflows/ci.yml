@@ -1,0 +1,66 @@
+# OmniFlux CI — the Codebreaker Law 8 checklist, enforced by machines
+# instead of memory. The test jobs install ffmpeg so the decode integration
+# test runs for real (and FAILS the build if the pipe stops working) instead
+# of skipping silently.
+#
+# NOTE: these action pins are the current majors at time of writing; they are
+# validated the first time this workflow runs against a real remote — if a
+# major has since moved, fix the pin rather than disabling the check.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  fmt-and-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy -- -D warnings
+
+  tests:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - name: install ffmpeg (the decode test decodes a real clip)
+        shell: bash
+        run: |
+          if command -v apt-get > /dev/null; then
+            sudo apt-get update && sudo apt-get install -y ffmpeg
+          else
+            choco install ffmpeg -y
+          fi
+      - run: cargo nextest run
+
+  audit:
+    # cargo-audit = RustSec advisory database gate (Law 4: known CVEs block).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  deny:
+    # cargo-deny = the local deny.toml rules (licenses/bans) as an action.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
