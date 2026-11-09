@@ -5,4 +5,7 @@ members = ["crates/omniflux-core", "spikes/playback"]
 
 [workspace.package]
 edition = "2021"
-# License is deliberately unset: the FOSS licensing decision is documented, not hardcoded here yet.
+# The open FOSS decision landed 2026-11-09 (project owner's call):
+# GPL-3.0-or-later. The full text is the repository's LICENSE file; every
+# member inherits the SPDX expression from here.
+license = "GPL-3.0-or-later"

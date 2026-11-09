@@ -55,3 +55,9 @@ the 30 fps realtime need; the sub-100 ms first-frame budget is a warm-engine
 question, not a decode-speed one. Full numbers + verdict: the planning
 vault's Task Note. These numbers describe ONE day on ONE machine — rerun on
 any machine before trusting them there.
+
+## License
+OmniFlux is free software under the **GNU GPL v3.0 or later** — the full text
+lives in [`LICENSE`](LICENSE). That is the free-forever guard: anyone may use,
+study, share, and modify OmniFlux, and anyone who builds on it must keep their
+version equally free. No paid tiers, no locked features, anywhere — ever.

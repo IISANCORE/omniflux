@@ -21,16 +21,14 @@ allow = [
     "Unicode-3.0",
     "Zlib",
     "BSL-1.0",
+    # OmniFlux itself, declared in the member manifests — repository LICENSE
+    # carries the full GPL-3.0 text (decision landed 2026-11-09).
+    "GPL-3.0-or-later",
 ]
 # NOTE: until there are external dependencies every entry above is
 # "unused" — cargo-deny warns about that per run; the warnings stay ON,
 # they are the reminder that this list exists for a future state.
 
-# The engine's own licensing is an OPEN decision (planning vault Task
-# Note, 2026-11-09) — no placeholder license is recorded anywhere.
-# Workspace members are marked `publish = false` until it is made, and
-# license checks skip unpublished members. When the decision lands: the
-# real license goes into the Cargo.tomls and `[licenses.private]` ignore
-# flips off again, resuming full checking of our own crates.
-[licenses.private]
-ignore = true
+# The licensing decision DID land (2026-11-09): GPL-3.0-or-later, so there
+# is no `[licenses.private]` waiver anymore — our own crates pass through
+# the same license check every dependency does.
