@@ -2,8 +2,20 @@
 name = "playback-spike"
 version = "0.1.0"
 edition.workspace = true
+# not-for-publishing while licensing is an open decision (Task Note
+# 2026-11-09); also prevents accidental `cargo publish`. Revisit when the
+# FOSS license lands.
+publish = false
 
 # omniflux-core: exercises the workspace wiring; the spike will consume real
 # engine primitives as they land.
 [dependencies]
 omniflux-core = { path = "../../crates/omniflux-core" }
+
+[lib]
+name = "playback_spike"
+path = "src/lib.rs"
+
+[[bin]]
+name = "playback-spike"
+path = "src/main.rs"
