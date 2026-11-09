@@ -1,0 +1,9 @@
+[package]
+name = "playback-spike"
+version = "0.1.0"
+edition.workspace = true
+
+# omniflux-core: exercises the workspace wiring; the spike will consume real
+# engine primitives as they land.
+[dependencies]
+omniflux-core = { path = "../../crates/omniflux-core" }

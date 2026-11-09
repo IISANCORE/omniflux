@@ -1,0 +1,8 @@
+# OmniFlux workspace — every crate below is one auditable unit (Codebreaker Law 4: no member gets deps without a stated reason).
+[workspace]
+resolver = "2"
+members = ["crates/omniflux-core", "spikes/playback"]
+
+[workspace.package]
+edition = "2021"
+# License is deliberately unset: the FOSS licensing decision is documented, not hardcoded here yet.
