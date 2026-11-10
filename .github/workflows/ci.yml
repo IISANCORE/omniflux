@@ -1,4 +1,4 @@
-# OmniFlux CI — the Codebreaker Law 8 checklist, enforced by machines
+# OmniFlux CI — the Codebreaker Law 12 checklist, enforced by machines
 # instead of memory. The test jobs install ffmpeg so the decode integration
 # test runs for real (and FAILS the build if the pipe stops working) instead
 # of skipping silently.
