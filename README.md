@@ -91,10 +91,13 @@ packets, 80 keyframes, `has_b_frames=2`):
 
 | clip | cold p50 | warm p50 | warm p95 | speedup | pixels identical |
 |---|---|---|---|---|---|
-| 640×360 | 48.0 ms | **2.8 ms** | 3.5 ms | 17.0× | 8/8 |
-| 1280×720 | 68.0 ms | **8.6 ms** | 10.3 ms | 7.9× | 8/8 |
-| 1920×1080, dense GOP | 97.9 ms | **19.1 ms** | 20.6 ms | 5.1× | 8/8 |
-| 1920×1080, sparse GOP | 102.1 ms | **20.8 ms** | 22.1 ms | 4.9× | 4/4 |
+| 640×360 | 47.1 ms | **2.5 ms** | 3.2 ms | 19.0× | 8/8 |
+| 1280×720 | 66.9 ms | **8.8 ms** | 9.2 ms | 7.6× | 8/8 |
+| 1920×1080, dense GOP | 96.6 ms | **17.8 ms** | 19.4 ms | 5.4× | 8/8 |
+| 1920×1080, sparse GOP | 95.6 ms | **18.3 ms** | 19.6 ms | 5.2× | 4/4 |
+
+(Reruns move the warm p50 by about ±1 ms at 1080p — the cold path is the
+steady one, the warm path is a 4–20 ms number either way.)
 
 Honest read of those numbers: the warm path removes the spawn-and-open cost
 (~80 ms), and what is left is the same per-frame decode+pixel cost the

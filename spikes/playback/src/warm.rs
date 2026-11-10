@@ -26,6 +26,15 @@
 //!   nothing until the next arrives. Pinning the encoder to one thread makes
 //!   each burst arrive immediately (measured A→1, B→3, C→3 frames; default
 //!   threading gave A→0, B→2). The decoder keeps its normal threading.
+//! - Shutdown order: close the decoder's stdin FIRST (EOF is how a decoder is
+//!   told to finish), then kill the process we spawned, then wait for the
+//!   reader thread. Killing alone is not enough: the binary we spawn may be a
+//!   WRAPPER — Chocolatey's `choco install ffmpeg` puts a shim on PATH, and
+//!   killing the shim leaves the real ffmpeg running behind it, still holding
+//!   the stdout pipe open. That is exactly how the first CI run hung for
+//!   15 minutes on Windows: every jump had succeeded and the test could not
+//!   finish, because the reader thread waited on a pipe nobody would close.
+//!   Closing stdin reaches the real binary whatever sits in front of it.
 //!
 //! Honest limits, stated up front:
 //! - Cases are KEYFRAME timestamps only. Mid-GOP jumps (the typical scrub
@@ -56,6 +65,10 @@ use crate::{fnv1a, read_stderr_tail};
 /// failure. Generous on purpose: a real hang must be loud, not a spinner.
 const JUMP_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Upper bound for the reader thread to finish once the decoder is gone.
+/// Past it we detach the thread (and say so) rather than hang the run.
+const READER_JOIN_TIMEOUT: Duration = Duration::from_secs(5);
+
 pub struct Frame {
     /// Moment the full frame was in this process's hands.
     pub arrived: Instant,
@@ -80,9 +93,14 @@ pub struct Burst {
 /// thread; the main thread stays free to time each jump.
 pub struct WarmDecoder {
     child: Child,
-    stdin: ChildStdin,
+    /// The decoder's stdin, in an Option so shutdown can close it (EOF) on
+    /// purpose — see the module comment on wrapper processes.
+    stdin: Option<ChildStdin>,
     frames: Receiver<Frame>,
     reader: Option<JoinHandle<()>>,
+    /// Signalled by the reader thread when it has finished, so shutdown can
+    /// wait for it without joining blindly.
+    reader_done: Receiver<()>,
     stderr_path: PathBuf,
     frame_bytes: usize,
     /// `L` from ffprobe's `has_b_frames`; every jump reads L+1 frames.
@@ -159,6 +177,7 @@ impl WarmDecoder {
             .ok_or_else(|| "warm decoder stdin pipe vanished".to_string())?;
 
         let (tx, rx) = mpsc::channel::<Frame>();
+        let (done_tx, done_rx) = mpsc::channel::<()>();
         let reader = std::thread::spawn(move || {
             let mut stdout = stdout;
             loop {
@@ -173,13 +192,15 @@ impl WarmDecoder {
                     Err(_) => break, // decoder closed/killed: no more frames
                 }
             }
+            let _ = done_tx.send(());
         });
 
         Ok(WarmDecoder {
             child,
-            stdin,
+            stdin: Some(stdin),
             frames: rx,
             reader: Some(reader),
+            reader_done: done_rx,
             stderr_path,
             frame_bytes,
             reorder_depth: reorder_depth as usize,
@@ -209,9 +230,13 @@ impl WarmDecoder {
         let stale_drained = self.drain_stale()?;
 
         let started = Instant::now();
-        self.stdin
+        let stdin = self
+            .stdin
+            .as_mut()
+            .ok_or_else(|| "the warm decoder's stdin is already closed".to_string())?;
+        stdin
             .write_all(feed)
-            .and_then(|()| self.stdin.flush())
+            .and_then(|()| stdin.flush())
             .map_err(|e| {
                 format!(
                     "writing {} feed bytes to the warm decoder failed: {e}; stderr tail: {}",
@@ -274,14 +299,37 @@ impl WarmDecoder {
 
 impl Drop for WarmDecoder {
     fn drop(&mut self) {
-        // The decoder exists only for this spike run; killing it is the
-        // simplest guaranteed-clean shutdown. Waiting first would need a
-        // timeout loop std doesn't provide, and an orphan ffmpeg holding a
-        // pipe open is exactly the kind of leak this law won't allow.
+        // Order matters, and it is the order that survives a wrapper process
+        // (Chocolatey's shim, for one) sitting between us and the real
+        // decoder — see the module comment.
+        //
+        // 1. Close stdin: EOF tells the decoder to finish. This is the only
+        //    signal that reaches the REAL binary when a wrapper is in front.
+        self.stdin = None;
+        // 2. Kill the process we spawned (the wrapper, in that case). Killing
+        //    is best-effort: it may already be gone.
         let _ = self.child.kill();
         let _ = self.child.wait();
+        // 3. Wait for the reader thread, but only for a while: it ends when
+        //    the decoder's stdout closes. If something outside this process
+        //    still holds that pipe open, detach rather than hang the whole
+        //    run — and say so loudly, because a stranded decoder is a fact
+        //    the reader of the log deserves.
         if let Some(reader) = self.reader.take() {
-            let _ = reader.join();
+            match self.reader_done.recv_timeout(READER_JOIN_TIMEOUT) {
+                Ok(()) => {
+                    let _ = reader.join();
+                }
+                Err(_) => {
+                    eprintln!(
+                        "warning: the warm decoder's reader thread did not finish within {} s \
+                         (a wrapper process may still hold the decoder's stdout pipe); \
+                         detaching it instead of hanging",
+                        READER_JOIN_TIMEOUT.as_secs()
+                    );
+                    drop(reader); // detach: the thread ends with the process
+                }
+            }
         }
     }
 }

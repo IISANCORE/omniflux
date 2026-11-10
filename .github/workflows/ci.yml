@@ -17,6 +17,10 @@ on:
 jobs:
   fmt-and-lint:
     runs-on: ubuntu-latest
+    # Every job carries a ceiling: a hung test must fail the build in minutes,
+    # not burn a runner for hours (the default is 6 h). A hang is a bug to fix,
+    # not a wait to sit through.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -31,6 +35,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
