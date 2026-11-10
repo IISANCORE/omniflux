@@ -1,0 +1,23 @@
+[package]
+name = "timeline-spike"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+# workspace-internal crate: OmniFlux ships as a product, not as a crates.io
+# package, so publish = false states that and blocks accidental `cargo
+# publish` (kept unchanged across the GPL-3.0-or-later decision, 2026-11-09).
+publish = false
+
+# omniflux-core: the timeline model and its edit commands — the thing this
+# spike measures. Workspace-internal; no external dependency is added, so
+# the license and advisory gates stay exactly as they were (Law 4).
+[dependencies]
+omniflux-core = { path = "../../crates/omniflux-core" }
+
+[lib]
+name = "timeline_spike"
+path = "src/lib.rs"
+
+[[bin]]
+name = "timeline-spike"
+path = "src/main.rs"

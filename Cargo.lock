@@ -12,3 +12,10 @@ version = "0.1.0"
 dependencies = [
  "omniflux-core",
 ]
+
+[[package]]
+name = "timeline-spike"
+version = "0.1.0"
+dependencies = [
+ "omniflux-core",
+]
