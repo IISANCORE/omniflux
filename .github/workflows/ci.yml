@@ -52,6 +52,13 @@ jobs:
           else
             choco install ffmpeg -y
           fi
+        # NOTE (2026-11-10): on Windows, `choco install ffmpeg` puts a SHIM on
+        # PATH — the process the spike spawns is a wrapper, not ffmpeg itself
+        # ("ShimGen has successfully created a shim for ffmpeg.exe" in the
+        # install log). The spike survives that: shutdown closes the decoder's
+        # stdin FIRST, so EOF reaches the real binary behind the wrapper.
+        # If a test hangs here, suspect a wrapper process before suspecting
+        # the protocol — that was exactly the 15-minute hang this note records.
       - run: cargo nextest run
 
   audit:
