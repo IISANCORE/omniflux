@@ -30,6 +30,9 @@
 //! - Tracks are listed in id order, so reading a file gives back the same
 //!   track ids it was written with.
 //! - Every number is an integer: positions are ticks, never seconds.
+//! - The bytes are deterministic: saving the same project twice produces the
+//!   same file, byte for byte (the JSON object keys come out in one fixed
+//!   order). That is what makes a git diff of a project file meaningful.
 
 use std::path::{Path, PathBuf};
 
