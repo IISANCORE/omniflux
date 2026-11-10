@@ -104,7 +104,8 @@ pub fn run_spike(config: &SpikeConfig) -> Result<Report, String> {
             )
             .map_err(|error| format!("adding media failed: {error}"))?;
     }
-    let mut tracks = Vec::with_capacity(TRACK_COUNT);
+    let track_count = TRACK_COUNT.min(config.clips.max(1));
+    let mut tracks = Vec::with_capacity(track_count);
     for index in 0..TRACK_COUNT {
         let kind = if index < TRACK_COUNT / 2 {
             TrackKind::Video
@@ -336,9 +337,17 @@ fn track_end(timeline: &Timeline, track: TrackId) -> Ticks {
 }
 
 /// A clip chosen at random from the whole project.
+///
+/// Only tracks that hold something can be chosen: an empty track has no
+/// clip to pick, and the harness must never panic on a project smaller than
+/// its own track count.
 fn pick_random_clip<'a>(rng: &mut Rng, timeline: &'a Timeline) -> &'a Clip {
-    let tracks = timeline.tracks();
-    let track = &tracks[rng.below(tracks.len() as u64) as usize];
+    let tracks: Vec<_> = timeline
+        .tracks()
+        .iter()
+        .filter(|track| !track.clips().is_empty())
+        .collect();
+    let track = tracks[rng.below(tracks.len() as u64) as usize];
     let clips = track.clips();
     &clips[rng.below(clips.len() as u64) as usize]
 }
@@ -478,7 +487,8 @@ pub fn print_report(report: &Report) {
     }
     match (report.bytes_per_clip, report.project_rss_bytes) {
         (Some(per_clip), Some(total)) => println!(
-            "memory: project resident={} MB, {} bytes per clip",
+            "memory: project resident={} MB, ~{} bytes per clip \
+             (resident memory moves in pages, so this is approximate)",
             total / (1024 * 1024),
             per_clip
         ),
@@ -542,5 +552,20 @@ mod tests {
             report.edits_refused, 0,
             "the harness only makes legal edits"
         );
+    }
+
+    #[test]
+    fn a_project_smaller_than_the_track_count_still_works() {
+        // Fewer clips than tracks: some tracks would have nothing on them,
+        // and the harness must not reach for a clip that is not there.
+        let report = run_spike(&SpikeConfig {
+            clips: 2,
+            edits: 20,
+            seed: 3,
+        })
+        .expect("the spike must run");
+
+        assert!(report.undo_restored_project);
+        assert!(report.redo_restored_project);
     }
 }
