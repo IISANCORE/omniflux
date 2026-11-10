@@ -134,6 +134,11 @@ impl Timeline {
         Ok(())
     }
 
+    /// Every source asset the project knows about.
+    pub fn media(&self) -> &[MediaAsset] {
+        &self.media
+    }
+
     /// How long a source asset is, if the project knows it.
     pub fn media_duration(&self, media: MediaId) -> Option<Ticks> {
         self.media
@@ -198,6 +203,9 @@ impl Timeline {
     /// would cover time another clip on that track already covers.
     pub fn insert_clip(&mut self, track_id: TrackId, clip: Clip) -> Result<(), CoreError> {
         self.check_clip_fits_media(&clip)?;
+        if self.clip(clip.id).is_some() {
+            return Err(CoreError::DuplicateClip { clip: clip.id });
+        }
         self.check_no_overlap_at(track_id, &clip, None)?;
 
         let Timeline { tracks, .. } = self;
@@ -564,6 +572,20 @@ mod tests {
             .insert_clip(track, clip(1, MediaId(1), 0, 0))
             .expect_err("a zero-length clip must be refused");
         assert_eq!(error, CoreError::EmptyClip { clip: ClipId(1) });
+    }
+
+    #[test]
+    fn two_clips_may_not_share_one_id() {
+        let mut timeline = timeline();
+        let track = timeline.add_track(TrackKind::Video, "Video 1");
+        timeline
+            .insert_clip(track, clip(1, MediaId(1), 0, 100))
+            .unwrap();
+
+        let error = timeline
+            .insert_clip(track, clip(1, MediaId(1), 200, 100))
+            .expect_err("a second clip with the same id must be refused");
+        assert_eq!(error, CoreError::DuplicateClip { clip: ClipId(1) });
     }
 
     #[test]

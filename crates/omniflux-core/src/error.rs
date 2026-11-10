@@ -37,6 +37,11 @@ pub enum CoreError {
     SplitOutsideClip { clip: ClipId, at: Ticks },
     /// A media asset with this id was already registered.
     DuplicateMedia { media: MediaId },
+    /// A clip with this id is already on the timeline.
+    ///
+    /// Clip ids are how the model, the commands and a saved project all
+    /// point at the same clip, so two clips may never share one.
+    DuplicateClip { clip: ClipId },
 }
 
 impl std::fmt::Display for CoreError {
@@ -77,6 +82,9 @@ impl std::fmt::Display for CoreError {
             ),
             CoreError::DuplicateMedia { media } => {
                 write!(f, "media asset {} is already registered", media.0)
+            }
+            CoreError::DuplicateClip { clip } => {
+                write!(f, "a clip with id {} is already on the timeline", clip.0)
             }
         }
     }
