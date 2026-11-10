@@ -1,7 +1,7 @@
 # OmniFlux workspace — every crate below is one auditable unit (Codebreaker Law 4: no member gets deps without a stated reason).
 [workspace]
 resolver = "2"
-members = ["crates/omniflux-core", "crates/omniflux-project", "spikes/playback", "spikes/timeline"]
+members = ["crates/omniflux-core", "crates/omniflux-project", "spikes/census", "spikes/playback", "spikes/timeline"]
 
 [workspace.package]
 edition = "2021"

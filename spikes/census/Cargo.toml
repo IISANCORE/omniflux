@@ -1,0 +1,29 @@
+[package]
+name = "census-spike"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+# workspace-internal crate: OmniFlux ships as a product, not as a crates.io
+# package, so publish = false states that and blocks accidental `cargo
+# publish` (kept unchanged across the GPL-3.0-or-later decision, 2026-11-09).
+publish = false
+
+[dependencies]
+# omniflux-core: the timeline model — the engine's own memory is part of the
+# census (workspace-internal).
+omniflux-core = { path = "../../crates/omniflux-core" }
+# omniflux-project: the .omni project file — its size on disk is part of the
+# census too (workspace-internal).
+omniflux-project = { path = "../../crates/omniflux-project" }
+# playback-spike: owns the FFmpeg discovery chain (env var, repo tools build,
+# PATH) so the census does not repeat it — the census measures the decoder
+# that spike already knows how to find (workspace-internal).
+playback-spike = { path = "../playback" }
+
+[lib]
+name = "census_spike"
+path = "src/lib.rs"
+
+[[bin]]
+name = "census-spike"
+path = "src/main.rs"
