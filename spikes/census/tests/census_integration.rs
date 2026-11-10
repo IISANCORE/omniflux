@@ -33,10 +33,19 @@ fn the_census_reports_the_engine_footprint() {
         );
     }
 
-    // Full resolution must cost MORE memory than proxy resolution — if it
-    // does not, the decoder was sampled before it started working and the
-    // number is a lie.
-    if let (Some(full), Some(proxy)) = (census.decoder_full_bytes, census.decoder_proxy_bytes) {
+    // On the platforms we support, the decoder's memory MUST be measurable:
+    // a number that cannot be read is not a small number, it is no number.
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    {
+        let full = census
+            .decoder_full_bytes
+            .expect("the decoder's memory must be measurable on this platform");
+        let proxy = census
+            .decoder_proxy_bytes
+            .expect("the decoder's memory must be measurable on this platform");
+        // Full resolution must cost MORE memory than proxy resolution — if it
+        // does not, the decoder was sampled before it started working and the
+        // number is a lie.
         assert!(
             full > proxy,
             "a 1080p decoder must cost more than a 640x360 one (measured {full} vs {proxy})"

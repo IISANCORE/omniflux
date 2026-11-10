@@ -16,6 +16,8 @@
 
 pub mod rss;
 
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -46,16 +48,6 @@ const DECODER_WARMUP: Duration = Duration::from_millis(1_200);
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(200);
 /// The fewest samples that make a decoder number believable.
 const MINIMUM_SAMPLES: usize = 3;
-
-/// Where the decoder's pixels are thrown away.
-///
-/// The name is the platform's null device — on Windows "NUL", elsewhere
-/// "/dev/null". Writing to the wrong one would fill the disk with frames
-/// (megabytes per frame, hundreds per second).
-#[cfg(windows)]
-const NULL_DEVICE: &str = "NUL";
-#[cfg(not(windows))]
-const NULL_DEVICE: &str = "/dev/null";
 
 /// What the census measured.
 #[derive(Debug, Clone)]
@@ -187,6 +179,11 @@ fn build_sample_project() -> Result<(Project, u64), String> {
 
 /// Watches a decoder working at the given resolution and reports its peak
 /// resident memory.
+///
+/// The decoder is run the way the app runs it: rgb24 frames over a pipe,
+/// which somebody drains. (Writing the frames to the platform's null device
+/// instead would be simpler, but it is not the shape the app uses, and on
+/// one platform it silently measured a process that had already died.)
 fn measure_decoder(ffmpeg: &Path, resolution: (u32, u32)) -> Result<Option<u64>, String> {
     let clip = std::env::temp_dir().join(format!(
         "omniflux-census-clip-{}x{}.mp4",
@@ -194,9 +191,13 @@ fn measure_decoder(ffmpeg: &Path, resolution: (u32, u32)) -> Result<Option<u64>,
     ));
     make_clip(ffmpeg, &clip, resolution)?;
 
-    // The shape the app really uses: decode, convert to rgb24, throw the
-    // pixels away. Decoding without converting would look cheaper than the
-    // app ever is, and this number exists to be honest.
+    let stderr_path = std::env::temp_dir().join(format!(
+        "omniflux-census-decoder-{}x{}.log",
+        resolution.0, resolution.1
+    ));
+    let stderr_file = File::create(&stderr_path)
+        .map_err(|error| format!("could not create the decoder log: {error}"))?;
+
     let mut child = Command::new(ffmpeg)
         .args([
             "-hide_banner",
@@ -210,13 +211,29 @@ fn measure_decoder(ffmpeg: &Path, resolution: (u32, u32)) -> Result<Option<u64>,
             "rgb24",
             "-f",
             "rawvideo",
-            NULL_DEVICE,
+            "pipe:1",
         ])
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::from(stderr_file))
         .spawn()
         .map_err(|error| format!("could not start the decoder: {error}"))?;
+
+    // Drain the frames: the decoder writes them far faster than we sample
+    // its memory, and a decoder blocked on a full pipe is not working.
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "the decoder's stdout pipe vanished".to_string())?;
+    let drain = std::thread::spawn(move || {
+        let mut stdout = stdout;
+        let mut buffer = vec![0u8; 64 * 1024];
+        while let Ok(read) = stdout.read(&mut buffer) {
+            if read == 0 {
+                break;
+            }
+        }
+    });
 
     let pid = child.id();
     let mut peak = 0u64;
@@ -240,9 +257,29 @@ fn measure_decoder(ffmpeg: &Path, resolution: (u32, u32)) -> Result<Option<u64>,
         }
         std::thread::sleep(SAMPLE_INTERVAL);
     }
+
+    let exited = child.try_wait().ok().flatten();
     let _ = child.kill();
     let _ = child.wait();
+    let _ = drain.join();
     let _ = std::fs::remove_file(&clip);
+
+    // A decoder that died leaves a zombie behind, and a zombie's memory
+    // reads as zero. Zero is not a measurement — it is the absence of one,
+    // and reporting it as a number would be a lie.
+    if peak == 0 {
+        let log = std::fs::read_to_string(&stderr_path).unwrap_or_default();
+        let _ = std::fs::remove_file(&stderr_path);
+        return Err(format!(
+            "the {}x{} decoder did not stay alive long enough to measure (exit: {:?}); \
+             its own words: {}",
+            resolution.0,
+            resolution.1,
+            exited.map(|status| status.to_string()),
+            log.trim()
+        ));
+    }
+    let _ = std::fs::remove_file(&stderr_path);
 
     // Too few samples means we did not really watch it work; saying "not
     // measurable" is honest, a low number would not be.
