@@ -247,7 +247,8 @@ pub fn run_spike(config: &SpikeConfig) -> Result<Report, String> {
     let loaded = Project::load_from(&file_path)
         .map_err(|error| format!("loading the project failed: {error}"))?;
     let load_elapsed = load_started.elapsed();
-    let file_round_trip_exact = loaded.timeline() == project.timeline();
+    let file_round_trip_exact =
+        loaded.timeline() == project.timeline() && loaded.locations() == project.locations();
     let _ = std::fs::remove_file(&file_path);
 
     Ok(Report {

@@ -185,19 +185,20 @@ What the format guarantees:
   than half-read, and a broken file names the place that is wrong
   (`tracks[0].clips[2].start: expected a number, found null`).
 
-Measured (2026-11-10, release profile, this dev machine):
+Measured (2026-11-10, release profile, this dev machine — each project
+started with that many clips and then had 5 000 edits applied):
 
 | project | file size | save | open | project identical |
 |---|---|---|---|---|
-| 500 clips | 177 KB | 3.4 ms | 32 ms | yes |
-| 2 000 clips | 400 KB | 6.5 ms | 17 ms | yes |
-| 5 000 clips | 846 KB | 14.5 ms | 33 ms | yes |
+| 500 clips | 332 KB | 5.6 ms | 9.5 ms | yes |
+| 2 000 clips | 556 KB | 8.6 ms | 16.6 ms | yes |
+| 5 000 clips | 1 002 KB | 16.4 ms | 30.9 ms | yes |
 
 So JSON is viable: a thousand-clip project opens in a few tens of
-milliseconds. At ~170 bytes per clip, a 50 000-clip project would be ~8 MB
-of text and a few hundred milliseconds to open — that is where a binary
-format would start to earn its keep, and the version header is there to
-make that switch possible without losing files.
+milliseconds. At **150 bytes per clip** (measured exactly), a 50 000-clip
+project would be ~7.5 MB of text and a few hundred milliseconds to open —
+that is where a binary format would start to earn its keep, and the version
+header is there to make that switch possible without losing files.
 
 ## License
 OmniFlux is free software under the **GNU GPL v3.0 or later** — the full text
