@@ -13,6 +13,9 @@ publish = false
 # the license and advisory gates stay exactly as they were (Law 4).
 [dependencies]
 omniflux-core = { path = "../../crates/omniflux-core" }
+# omniflux-project: the .omni project file, so the spike can measure what
+# saving and opening a project costs (workspace-internal).
+omniflux-project = { path = "../../crates/omniflux-project" }
 
 [lib]
 name = "timeline_spike"

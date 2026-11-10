@@ -21,6 +21,7 @@ use std::time::Instant;
 use omniflux_core::edit::{Command, History, InsertClip, MoveClip, SplitClip, TrimClip};
 use omniflux_core::time::{Ticks, Timebase};
 use omniflux_core::timeline::{Clip, ClipId, MediaId, Timeline, TrackId, TrackKind};
+use omniflux_project::Project;
 
 /// How many source assets the project has.
 const MEDIA_COUNT: usize = 8;
@@ -85,6 +86,14 @@ pub struct Report {
     pub undo_restored_project: bool,
     /// Whether redoing every edit returned the project exactly.
     pub redo_restored_project: bool,
+    /// How long writing the project file took, in milliseconds.
+    pub save_ms: f64,
+    /// How long reading it back took, in milliseconds.
+    pub load_ms: f64,
+    /// How big the project file is, in bytes.
+    pub file_bytes: u64,
+    /// Whether the project came back from the file exactly as it went in.
+    pub file_round_trip_exact: bool,
 }
 
 /// Builds a project, edits it, undoes everything, and measures the lot.
@@ -214,6 +223,33 @@ pub fn run_spike(config: &SpikeConfig) -> Result<Report, String> {
 
     let edits_total: f64 = edit_millis.iter().sum();
 
+    // ---- the project file -------------------------------------------------
+    // The same project, written to disk and read back: how long that takes,
+    // how big the file is, and whether the project survives the trip
+    // unchanged. This is what a user feels when they press Save and Open.
+    let file_path = std::env::temp_dir().join("omniflux-timeline-spike.omni");
+    let mut project = Project::new(timeline.clone());
+    project.set_location(
+        MediaId(0),
+        file_path.with_file_name("footage").join("a.mp4"),
+    );
+
+    let save_started = Instant::now();
+    project
+        .save_to(&file_path)
+        .map_err(|error| format!("saving the project failed: {error}"))?;
+    let save_elapsed = save_started.elapsed();
+    let file_bytes = std::fs::metadata(&file_path)
+        .map(|meta| meta.len())
+        .unwrap_or(0);
+
+    let load_started = Instant::now();
+    let loaded = Project::load_from(&file_path)
+        .map_err(|error| format!("loading the project failed: {error}"))?;
+    let load_elapsed = load_started.elapsed();
+    let file_round_trip_exact = loaded.timeline() == project.timeline();
+    let _ = std::fs::remove_file(&file_path);
+
     Ok(Report {
         clips: config.clips,
         tracks: TRACK_COUNT,
@@ -242,6 +278,10 @@ pub fn run_spike(config: &SpikeConfig) -> Result<Report, String> {
         project_rss_bytes: rss_after_build,
         undo_restored_project,
         redo_restored_project,
+        save_ms: save_elapsed.as_secs_f64() * 1000.0,
+        load_ms: load_elapsed.as_secs_f64() * 1000.0,
+        file_bytes,
+        file_round_trip_exact,
     })
 }
 
@@ -495,8 +535,16 @@ pub fn print_report(report: &Report) {
         _ => println!("memory: project size not measurable on this platform"),
     }
     println!(
+        "file: save={:.1}ms load={:.1}ms size={} KB round_trip_exact={}",
+        report.save_ms,
+        report.load_ms,
+        report.file_bytes / 1024,
+        report.file_round_trip_exact
+    );
+    println!(
         "summary: edits={} edit_p50={:.3}ms undo_p50={:.3}ms redo_p50={:.3}ms \
-         bytes_per_undo_entry={} bytes_per_clip={} undo_restored={} redo_restored={}",
+         bytes_per_undo_entry={} bytes_per_clip={} save={:.1}ms load={:.1}ms \
+         file_kb={} undo_restored={} redo_restored={} file_exact={}",
         report.edits,
         report.edit_p50_ms,
         report.undo_p50_ms,
@@ -509,8 +557,12 @@ pub fn print_report(report: &Report) {
             .bytes_per_clip
             .map(|bytes| bytes.to_string())
             .unwrap_or_else(|| "n/a".to_string()),
+        report.save_ms,
+        report.load_ms,
+        report.file_bytes / 1024,
         report.undo_restored_project,
         report.redo_restored_project,
+        report.file_round_trip_exact,
     );
 }
 
