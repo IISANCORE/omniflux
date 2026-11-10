@@ -23,6 +23,7 @@ it ships. Nothing hidden, nothing fake, no cleverness for cleverness's sake.
 ```
 crates/
   omniflux-core/        the engine's root crate: vocabulary every crate may depend on
+  omniflux-project/     the .omni project file: saving a project and opening it again
 spikes/
   playback/             decode-to-frame pipeline + warm-scrub seek mode
   timeline/             the timeline model measured under load: edit cost, undo cost
@@ -147,6 +148,56 @@ side, not the model — which the RAM census still has to measure.
 ```
 cargo run --release -p timeline-spike -- [clips] [edits]
 ```
+
+## The project file — `.omni`
+
+A project can be saved and opened again. The file is **JSON text**, and its
+extension is `.omni`:
+
+```json
+{
+  "format": "omniflux-project",
+  "version": 1,
+  "timebase": { "ticks_per_second": 90000 },
+  "media": [ { "id": 0, "duration": 5400000, "path": "footage/a.mp4" } ],
+  "tracks": [
+    { "id": 0, "kind": "video", "name": "Video 1",
+      "clips": [ { "id": 0, "media": 0, "start": 0, "duration": 2700000, "source_in": 0 } ] }
+  ]
+}
+```
+
+Why JSON and not a binary blob: you can open a `.omni` file in a text
+editor, read what it says, and fix it by hand; git can show what changed
+between two versions of a project; and a binary format would only be the
+right answer once projects get big enough for it to matter — then, and not
+before.
+
+What the format guarantees:
+
+- every number is an integer — positions are ticks, never seconds, so a
+  file cannot reintroduce the rounding bugs the model avoids;
+- media inside the project folder is stored **relative**, so a project can
+  be moved or shared as a whole;
+- saving is **atomic** — the file is written under a temporary name and
+  then moved into place, so a crash cannot leave a project half-written;
+- a file from a **newer** OmniFlux is refused with a clear message rather
+  than half-read, and a broken file names the place that is wrong
+  (`tracks[0].clips[2].start: expected a number, found null`).
+
+Measured (2026-11-10, release profile, this dev machine):
+
+| project | file size | save | open | project identical |
+|---|---|---|---|---|
+| 500 clips | 177 KB | 3.4 ms | 32 ms | yes |
+| 2 000 clips | 400 KB | 6.5 ms | 17 ms | yes |
+| 5 000 clips | 846 KB | 14.5 ms | 33 ms | yes |
+
+So JSON is viable: a thousand-clip project opens in a few tens of
+milliseconds. At ~170 bytes per clip, a 50 000-clip project would be ~8 MB
+of text and a few hundred milliseconds to open — that is where a binary
+format would start to earn its keep, and the version header is there to
+make that switch possible without losing files.
 
 ## License
 OmniFlux is free software under the **GNU GPL v3.0 or later** — the full text

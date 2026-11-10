@@ -13,6 +13,7 @@ marked *(planned)* describes the intended shape, not existing code.
 crates/
   omniflux-core/     the engine's root crate: vocabulary every crate may depend on
                      (time, the timeline model, the edits that change it)
+  omniflux-project/  the .omni project file: saving a project and opening it again
 spikes/
   playback/          benchmark workbench: ffmpeg -> frames, prints measured numbers
   timeline/          benchmark workbench: the timeline model's edit/undo cost
