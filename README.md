@@ -22,10 +22,13 @@ it ships. Nothing hidden, nothing fake, no cleverness for cleverness's sake.
 ## Layout
 ```
 crates/
-  omniflux-core/        engine fundamentals shared by everything
+  omniflux-core/        the engine's root crate: vocabulary every crate may depend on
 spikes/
   playback/             first benchmark spike: decode-to-frame pipeline workbench
 ```
+
+Where a new feature belongs, and which crate owns what:
+see [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Build
 ```
