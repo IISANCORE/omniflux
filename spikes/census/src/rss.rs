@@ -96,6 +96,76 @@ pub fn total_machine_bytes() -> Option<u64> {
     }
 }
 
+/// The pids of a process's direct children.
+///
+/// The census needs this because the binary we spawn may be a WRAPPER
+/// (Chocolatey's shim): the memory that matters is the wrapper AND the real
+/// decoder behind it, because that is what running ffmpeg actually costs on
+/// this machine.
+pub fn child_pids(pid: u32) -> Vec<u32> {
+    #[cfg(target_os = "linux")]
+    {
+        linux_child_pids(pid)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        windows_child_pids(pid)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    {
+        let _ = pid;
+        Vec::new()
+    }
+}
+
+/// Linux: scan /proc for processes whose parent is ours.
+#[cfg(target_os = "linux")]
+fn linux_child_pids(pid: u32) -> Vec<u32> {
+    let mut children = Vec::new();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return children;
+    };
+    for entry in entries.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        let Ok(child) = name.parse::<u32>() else {
+            continue;
+        };
+        if child != pid && linux_parent_pid(child) == Some(pid) {
+            children.push(child);
+        }
+    }
+    children
+}
+
+/// Linux: a process's parent, from /proc/<pid>/stat.
+#[cfg(target_os = "linux")]
+fn linux_parent_pid(pid: u32) -> Option<u32> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // The line is "pid (comm) state ppid ..." and comm may contain spaces
+    // and brackets, so the fields after the closing parenthesis are ours.
+    let after_comm = stat.rsplit_once(')')?.1;
+    after_comm.split_whitespace().nth(1)?.parse().ok()
+}
+
+/// Windows: ask the operating system which processes a process started.
+#[cfg(target_os = "windows")]
+fn windows_child_pids(pid: u32) -> Vec<u32> {
+    let script =
+        format!("(Get-CimInstance Win32_Process -Filter \"ParentProcessId={pid}\").ProcessId");
+    let Ok(output) = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", &script])
+        .output()
+    else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.trim().parse::<u32>().ok())
+        .collect()
+}
+
 /// A one-line description of the machine the census ran on, so every number
 /// it prints has provenance (Law 6).
 pub fn machine_description() -> String {

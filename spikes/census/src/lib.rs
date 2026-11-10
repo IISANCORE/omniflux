@@ -19,7 +19,8 @@ pub mod rss;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use omniflux_core::edit::{Command as EditCommand, History, TrimClip};
@@ -48,6 +49,29 @@ const DECODER_WARMUP: Duration = Duration::from_millis(1_200);
 const SAMPLE_INTERVAL: Duration = Duration::from_millis(200);
 /// The fewest samples that make a decoder number believable.
 const MINIMUM_SAMPLES: usize = 3;
+
+/// How long to wait for the decoder's output reader to finish once the
+/// decoder is gone.
+const DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Stops the decoder AND anything it started.
+///
+/// On Windows the binary we spawn may be a WRAPPER — Chocolatey's shim, for
+/// one — and killing the wrapper leaves the real ffmpeg running behind it,
+/// still holding the output pipe open. That is the same trap that hung the
+/// warm decoder's shutdown. `taskkill /T` kills the tree; everywhere else
+/// the child we started is the process we mean.
+fn kill_process_tree(child: &mut Child) {
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &child.id().to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
+}
 
 /// What the census measured.
 #[derive(Debug, Clone)]
@@ -225,6 +249,7 @@ fn measure_decoder(ffmpeg: &Path, resolution: (u32, u32)) -> Result<Option<u64>,
         .stdout
         .take()
         .ok_or_else(|| "the decoder's stdout pipe vanished".to_string())?;
+    let (drained_tx, drained_rx) = mpsc::channel::<()>();
     let drain = std::thread::spawn(move || {
         let mut stdout = stdout;
         let mut buffer = vec![0u8; 64 * 1024];
@@ -233,35 +258,51 @@ fn measure_decoder(ffmpeg: &Path, resolution: (u32, u32)) -> Result<Option<u64>,
                 break;
             }
         }
+        let _ = drained_tx.send(());
     });
 
     let pid = child.id();
+    // The binary we spawned may be a wrapper (Chocolatey's shim), so the
+    // memory that matters is the whole tree: the wrapper plus the real
+    // decoder behind it. Ask once, after the decoder has started.
+    std::thread::sleep(DECODER_WARMUP);
+    let mut pids = vec![pid];
+    pids.extend(rss::child_pids(pid));
+
     let mut peak = 0u64;
     let mut samples = 0usize;
-    std::thread::sleep(DECODER_WARMUP);
     let watch_until = Instant::now() + DECODER_WATCH;
     while Instant::now() < watch_until {
-        match rss::resident_bytes_of(pid) {
-            Some(bytes) => {
-                if std::env::var_os("CENSUS_DEBUG").is_some() {
-                    eprintln!("  sample pid {pid}: {bytes} bytes");
-                }
-                peak = peak.max(bytes);
-                samples += 1;
-            }
-            None => {
-                if std::env::var_os("CENSUS_DEBUG").is_some() {
-                    eprintln!("  sample pid {pid}: not found");
-                }
-            }
+        let bytes: u64 = pids
+            .iter()
+            .filter_map(|member| rss::resident_bytes_of(*member))
+            .sum();
+        if std::env::var_os("CENSUS_DEBUG").is_some() {
+            eprintln!("  sample pids {pids:?}: {bytes} bytes");
+        }
+        if bytes > 0 {
+            peak = peak.max(bytes);
+            samples += 1;
         }
         std::thread::sleep(SAMPLE_INTERVAL);
     }
 
     let exited = child.try_wait().ok().flatten();
-    let _ = child.kill();
+    kill_process_tree(&mut child);
     let _ = child.wait();
-    let _ = drain.join();
+    // The drain thread ends when the pipe closes — which needs the decoder
+    // GONE, not just our handle on it. Wait for it, but never forever: a
+    // thread that outlives the measurement is better than a hung run, as
+    // long as we say so.
+    let drained = drained_rx.recv_timeout(DRAIN_TIMEOUT).is_ok();
+    if drained {
+        let _ = drain.join();
+    } else {
+        eprintln!(
+            "warning: the decoder's output reader did not finish within {} s; detaching it",
+            DRAIN_TIMEOUT.as_secs()
+        );
+    }
     let _ = std::fs::remove_file(&clip);
 
     // A decoder that died leaves a zombie behind, and a zombie's memory

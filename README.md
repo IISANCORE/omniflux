@@ -229,10 +229,16 @@ Measured (2026-11-10, release profile, **dev machine**: Windows, 12 cores,
 | our process, empty | 4.3 MB |
 | our process, 500-clip project + 5 000 edits | 4.8 MB |
 | &nbsp;&nbsp;of which the project and the history | 0.47 MB |
-| decoder working, 1920×1080 | **~210 MB** (peak: 197–226 MB across runs) |
-| decoder working, 640×360 (proxy) | **~53 MB** (52–54 MB) |
+| decoder working, 1920×1080 | **~210 MB** (195–225 MB across runs) |
+| decoder working, 640×360 (proxy) | **~53 MB** (50–54 MB) |
 | project file on disk (500 clips) | 75 KB (150 B/clip) |
 | projected editor total (ours + a proxy decoder, no renderer yet) | **~57 MB** |
+
+The decoder rows measure the whole process tree, because the binary on a
+machine may be a *wrapper* — a Chocolatey-installed ffmpeg puts a ~15 MB
+shim in front of the real decoder, and that shim is what a user would
+actually be running. This dev machine has no wrapper; a Chocolatey one
+measures ~250 MB at 1080p for the same reason.
 
 What it decides: the **arrangement is cheap** (a 500-clip project with 5 000
 edits of history costs half a megabyte) and the **decode is the budget**
