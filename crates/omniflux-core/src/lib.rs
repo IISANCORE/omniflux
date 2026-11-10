@@ -1,14 +1,27 @@
 //! omniflux-core — the engine's root crate: the vocabulary every other crate
 //! is allowed to depend on.
 //!
-//! Responsible for: the small, stable types and facts shared across the engine.
-//! Not responsible for: decoding, rendering, export, or anything that needs a
-//! window, a codec, or a filesystem to exist.
+//! Responsible for: the small, stable types and facts shared across the
+//! engine — exact time and the timeline model. Not responsible for:
+//! decoding, rendering, export, or anything that needs a window, a codec, or
+//! a filesystem to exist.
 //!
-//! Today that vocabulary is one function (the engine's own version). The crate
-//! is deliberately tiny: it exists so the workspace, toolchain, and test
-//! pipeline are proven end-to-end before any real engine module lands.
-//! (Codebreaker Law 0: small steps that compile.)
+//! Module map:
+//! - [`time`] — exact time: ticks and the project timebase.
+//! - [`timeline`] — the model: media, tracks, clips, and the rules they obey.
+//! - [`error`] — the one error type this crate returns.
+//!
+//! Everything here is engine vocabulary: something the UI, the CLI and the
+//! codecs all have to agree on. The layout of material and the clock it is
+//! measured on — nothing else.
+
+pub mod error;
+pub mod timeline;
+pub mod time;
+
+pub use error::CoreError;
+pub use timeline::{Clip, ClipId, MediaAsset, MediaId, Timeline, Track, TrackId, TrackKind};
+pub use time::{Ticks, Timebase};
 
 /// Returns the engine's own version, sourced from the package manifest.
 /// Kept as a function (not a constant) so callers can be traced in logs.
