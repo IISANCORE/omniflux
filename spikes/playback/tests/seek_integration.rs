@@ -136,3 +136,83 @@ fn warm_decoder_keyframe_jumps_match_cold_pixels() {
     drop(warm); // shut the decoder down before deleting the clip
     let _ = std::fs::remove_file(&clip); // best-effort cleanup
 }
+
+/// The decoder must finish on its own when its input closes — no kill
+/// needed. This is the mechanism the shutdown relies on, and it is the
+/// mechanism that survives a WRAPPER process: on Windows CI, the ffmpeg on
+/// PATH is Chocolatey's shim, and killing the shim leaves the real ffmpeg
+/// alive behind it, still holding the decoder's stdout pipe open. That
+/// topology hung the first CI run for 15 minutes; closing the input is what
+/// reaches the real binary, whatever sits in front of it.
+#[test]
+fn the_decoder_exits_when_its_input_closes() {
+    let ffmpeg = match locate_ffmpeg() {
+        Ok(ff) => ff,
+        Err(msg) => {
+            println!("SKIPPED: ffmpeg not locatable ({msg})");
+            return;
+        }
+    };
+    if !probe_usable(&ffmpeg) {
+        println!("SKIPPED: ffmpeg not usable on this machine — expected until tools/ build lands");
+        return;
+    }
+    let ffprobe = match locate_ffprobe(&ffmpeg) {
+        Ok(p) => p,
+        Err(msg) => {
+            println!("SKIPPED: ffprobe not locatable ({msg})");
+            return;
+        }
+    };
+    if !probe_usable(&ffprobe) {
+        println!("SKIPPED: ffprobe not usable on this machine — seek spike needs it for the index");
+        return;
+    }
+
+    let clip = std::env::temp_dir().join("omniflux-shutdown-clip.mp4");
+    generate_test_clip_gop(&ffmpeg, &clip, 30, (320, 180), Some(10))
+        .expect("ffmpeg must generate the deterministic clip");
+
+    let index = build_index(&ffprobe, &clip).expect("ffprobe must build the jump index");
+    let reorder = index.has_b_frames as usize;
+    let keyframe = index
+        .keyframe_indices()
+        .first()
+        .copied()
+        .expect("the generated clip must have a keyframe");
+
+    let mut warm = WarmDecoder::spawn(&ffmpeg, index.width, index.height, index.has_b_frames)
+        .expect("the warm decoder process must start");
+    let mut file = File::open(&clip).expect("the clip we just wrote must open");
+    let feed = build_feed(&mut file, &index, keyframe, reorder + 1)
+        .expect("a feed must build from indexed packets");
+
+    // One feed proves the decoder is alive and decoding (it waits for more
+    // input afterwards) — that is the state in which EOF must end it.
+    let burst = warm
+        .warm_up(&feed)
+        .expect("the warm-up feed must deliver one frame");
+    assert_eq!(burst.frames_read, 1);
+    assert!(
+        !warm.has_exited(),
+        "the decoder must still be running while it waits for more input"
+    );
+
+    warm.close_input();
+
+    // Bounded wait for an external process to notice EOF and leave. The
+    // deadline only bounds the FAILURE case; the outcome itself is binary.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !warm.has_exited() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(
+        warm.has_exited(),
+        "the decoder must exit by itself once its input closes — shutdown \
+         depends on EOF, not on killing the process (a wrapper process would \
+         survive the kill)"
+    );
+
+    drop(warm);
+    let _ = std::fs::remove_file(&clip); // best-effort cleanup
+}

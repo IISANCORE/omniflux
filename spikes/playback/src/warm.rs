@@ -215,6 +215,19 @@ impl WarmDecoder {
         self.reorder_depth
     }
 
+    /// Closes the decoder's input. The decoder sees EOF and finishes on its
+    /// own — the one signal that reaches the real binary even when a wrapper
+    /// process stands in front of it (Chocolatey's shim, for one). Closing
+    /// twice is harmless.
+    pub fn close_input(&mut self) {
+        self.stdin = None;
+    }
+
+    /// True once the decoder process has exited on its own.
+    pub fn has_exited(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(Some(_)))
+    }
+
     /// Sends the first feed and reads the ONE frame it emits. Leaves the
     /// decoder holding L frames — the steady state every jump assumes.
     pub fn warm_up(&mut self, feed: &[u8]) -> Result<Burst, String> {
@@ -305,7 +318,7 @@ impl Drop for WarmDecoder {
         //
         // 1. Close stdin: EOF tells the decoder to finish. This is the only
         //    signal that reaches the REAL binary when a wrapper is in front.
-        self.stdin = None;
+        self.close_input();
         // 2. Kill the process we spawned (the wrapper, in that case). Killing
         //    is best-effort: it may already be gone.
         let _ = self.child.kill();
