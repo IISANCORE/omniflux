@@ -16,6 +16,12 @@
 //! Everything here is engine vocabulary: something the UI, the CLI and the
 //! codecs all have to agree on. The layout of material, the clock it is
 //! measured on, and the edits that move it — nothing else.
+//!
+//! Note on the 4 GB target: this crate is measured on the dev machine while
+//! the engine is built, and 4 GB is the goal the optimisation work aims at
+//! (see the RAM census in the planning vault's Task Note). The numbers this
+//! crate produces are its own — the model's memory is small and stays
+//! small; the heavy part of the budget is decoding and rendering.
 
 pub mod edit;
 pub mod error;

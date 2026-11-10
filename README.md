@@ -7,6 +7,12 @@ everyone, deep engine underneath the hood.
 
 ## Pillars
 1. Runs on 4 GB RAM — performance is a feature, not an afterthought.
+   *4 GB is the **destination**, not where we measure. The engine is built and
+   measured on the dev machine first (8 GB DDR4, a fast CPU, an iGPU), and
+   every number in this README says which machine produced it. Getting down
+   to 4 GB is optimisation work, tracked in the planning vault's Task Note —
+   the levers are proxy-resolution preview, a bounded frame queue, and a
+   renderer that does not hoard frames.*
 2. Local-first and forever-free; Codebreaker laws are the non-negotiables.
 3. Minimalist UI, deliberately deep — progressive disclosure, not smoked-glass menus.
 
