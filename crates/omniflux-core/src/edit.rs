@@ -25,7 +25,11 @@ pub trait Command: std::fmt::Debug {
     fn label(&self) -> &'static str;
 
     /// Applies the edit and returns the command that undoes it.
-    fn apply(self: Box<Self>, timeline: &mut Timeline) -> Result<Box<dyn Command>, CoreError>;
+    ///
+    /// The command is applied by reference, not consumed: a command that
+    /// fails to apply must still be there afterwards, or the history would
+    /// quietly lose an entry the user is entitled to undo.
+    fn apply(&self, timeline: &mut Timeline) -> Result<Box<dyn Command>, CoreError>;
 }
 
 /// Wraps an inverse command with the label of the edit it undoes.
@@ -44,7 +48,7 @@ impl Command for Inverse {
         self.label
     }
 
-    fn apply(self: Box<Self>, timeline: &mut Timeline) -> Result<Box<dyn Command>, CoreError> {
+    fn apply(&self, timeline: &mut Timeline) -> Result<Box<dyn Command>, CoreError> {
         self.inner.apply(timeline)
     }
 }
@@ -61,9 +65,9 @@ impl Command for InsertClip {
         "Insert clip"
     }
 
-    fn apply(self: Box<Self>, timeline: &mut Timeline) -> Result<Box<dyn Command>, CoreError> {
+    fn apply(&self, timeline: &mut Timeline) -> Result<Box<dyn Command>, CoreError> {
         let clip_id = self.clip.id;
-        timeline.insert_clip(self.track, self.clip)?;
+        timeline.insert_clip(self.track, self.clip.clone())?;
         Ok(Box::new(Inverse {
             label: "Insert clip",
             inner: Box::new(RemoveClip {
@@ -86,7 +90,7 @@ impl Command for RemoveClip {
         "Remove clip"
     }
 
-    fn apply(self: Box<Self>, timeline: &mut Timeline) -> Result<Box<dyn Command>, CoreError> {
+    fn apply(&self, timeline: &mut Timeline) -> Result<Box<dyn Command>, CoreError> {
         let removed = timeline.remove_clip(self.track, self.clip)?;
         Ok(Box::new(Inverse {
             label: "Remove clip",
@@ -111,7 +115,7 @@ impl Command for MoveClip {
         "Move clip"
     }
 
-    fn apply(self: Box<Self>, timeline: &mut Timeline) -> Result<Box<dyn Command>, CoreError> {
+    fn apply(&self, timeline: &mut Timeline) -> Result<Box<dyn Command>, CoreError> {
         let (from_track, from_start) =
             timeline.move_clip(self.clip, self.to_track, self.to_start)?;
         Ok(Box::new(Inverse {
@@ -138,7 +142,7 @@ impl Command for TrimClip {
         "Trim clip"
     }
 
-    fn apply(self: Box<Self>, timeline: &mut Timeline) -> Result<Box<dyn Command>, CoreError> {
+    fn apply(&self, timeline: &mut Timeline) -> Result<Box<dyn Command>, CoreError> {
         let (old_source_in, old_duration) =
             timeline.trim_clip(self.clip, self.new_source_in, self.new_duration)?;
         Ok(Box::new(Inverse {
@@ -168,7 +172,7 @@ impl Command for SplitClip {
         "Split clip"
     }
 
-    fn apply(self: Box<Self>, timeline: &mut Timeline) -> Result<Box<dyn Command>, CoreError> {
+    fn apply(&self, timeline: &mut Timeline) -> Result<Box<dyn Command>, CoreError> {
         let (old_source_in, old_duration) = {
             let original = timeline
                 .clip(self.clip)
@@ -221,10 +225,9 @@ impl Command for Composite {
         "Several edits"
     }
 
-    fn apply(self: Box<Self>, timeline: &mut Timeline) -> Result<Box<dyn Command>, CoreError> {
-        let Composite { commands } = *self;
-        let mut inverses = Vec::with_capacity(commands.len());
-        for command in commands {
+    fn apply(&self, timeline: &mut Timeline) -> Result<Box<dyn Command>, CoreError> {
+        let mut inverses = Vec::with_capacity(self.commands.len());
+        for command in &self.commands {
             inverses.push(command.apply(timeline)?);
         }
         Ok(Box::new(Composite {
@@ -272,9 +275,18 @@ impl History {
         let Some(inverse) = self.undo.pop() else {
             return Ok(false);
         };
-        let forward = inverse.apply(timeline)?;
-        self.redo.push(forward);
-        Ok(true)
+        match inverse.apply(timeline) {
+            Ok(forward) => {
+                self.redo.push(forward);
+                Ok(true)
+            }
+            Err(error) => {
+                // The undo did not happen, so the entry must stay where it
+                // was: losing it would quietly shorten the user's history.
+                self.undo.push(inverse);
+                Err(error)
+            }
+        }
     }
 
     /// Redoes the most recently undone edit. Returns false when there is
@@ -283,9 +295,16 @@ impl History {
         let Some(forward) = self.redo.pop() else {
             return Ok(false);
         };
-        let inverse = forward.apply(timeline)?;
-        self.undo.push(inverse);
-        Ok(true)
+        match forward.apply(timeline) {
+            Ok(inverse) => {
+                self.undo.push(inverse);
+                Ok(true)
+            }
+            Err(error) => {
+                self.redo.push(forward);
+                Err(error)
+            }
+        }
     }
 
     /// How many edits can still be undone.
@@ -473,6 +492,38 @@ mod tests {
         assert!(matches!(error, CoreError::OverlappingClip { .. }));
         assert_eq!(timeline, before, "a refused edit changes nothing");
         assert_eq!(history.undo_depth(), 0, "a refused edit is not an edit");
+    }
+
+    #[test]
+    fn a_failed_undo_keeps_the_history_intact() {
+        let (mut timeline, track) = project();
+        let mut history = History::new();
+
+        history
+            .execute(
+                &mut timeline,
+                Box::new(InsertClip {
+                    track,
+                    clip: clip(1, 0, 100),
+                }),
+            )
+            .unwrap();
+        assert_eq!(history.undo_depth(), 1);
+
+        // Something outside the history takes the clip away — the model's own
+        // mutators are public, so this is possible — and the undo can no
+        // longer be applied.
+        timeline.remove_clip(track, ClipId(1)).unwrap();
+
+        let error = history
+            .undo(&mut timeline)
+            .expect_err("the undo must fail, because the clip is gone");
+        assert!(matches!(error, CoreError::UnknownClip { .. }));
+        assert_eq!(
+            history.undo_depth(),
+            1,
+            "a failed undo must not quietly shorten the history"
+        );
     }
 
     #[test]
