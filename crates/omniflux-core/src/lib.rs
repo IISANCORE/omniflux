@@ -2,26 +2,30 @@
 //! is allowed to depend on.
 //!
 //! Responsible for: the small, stable types and facts shared across the
-//! engine — exact time and the timeline model. Not responsible for:
-//! decoding, rendering, export, or anything that needs a window, a codec, or
-//! a filesystem to exist.
+//! engine — exact time, the timeline model, and the edits that change it.
+//! Not responsible for: decoding, rendering, export, or anything that needs a
+//! window, a codec, or a filesystem to exist.
 //!
 //! Module map:
 //! - [`time`] — exact time: ticks and the project timebase.
 //! - [`timeline`] — the model: media, tracks, clips, and the rules they obey.
+//! - [`edit`] — the commands that change the model, and the history that
+//!   undoes them.
 //! - [`error`] — the one error type this crate returns.
 //!
 //! Everything here is engine vocabulary: something the UI, the CLI and the
-//! codecs all have to agree on. The layout of material and the clock it is
-//! measured on — nothing else.
+//! codecs all have to agree on. The layout of material, the clock it is
+//! measured on, and the edits that move it — nothing else.
 
+pub mod edit;
 pub mod error;
-pub mod timeline;
 pub mod time;
+pub mod timeline;
 
+pub use edit::{Command, History};
 pub use error::CoreError;
-pub use timeline::{Clip, ClipId, MediaAsset, MediaId, Timeline, Track, TrackId, TrackKind};
 pub use time::{Ticks, Timebase};
+pub use timeline::{Clip, ClipId, MediaAsset, MediaId, Timeline, Track, TrackId, TrackKind};
 
 /// Returns the engine's own version, sourced from the package manifest.
 /// Kept as a function (not a constant) so callers can be traced in logs.
