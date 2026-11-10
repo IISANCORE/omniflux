@@ -15,9 +15,12 @@ the FFmpeg choice is documented, not hardcoded into the build).
   **out-of-process** (CLI sidecar over a pipe, see `spikes/playback`); no GPL
   code enters the Rust crate graph, so the engine's own licensing stays an
   open, documented decision — see the planning vault's licensing notes.
-- The folder also ships `ffprobe.exe` (usable later for metadata probing) and
-  HTML docs (candor: mostly dead weight, kept because they ship with the
-  release).
+- The folder also ships `ffprobe.exe` — the seek spike needs it for the
+  packet index (keyframes, byte offsets, `has_b_frames`), so it is a
+  requirement of `playback-spike seek`, not optional tooling. It is found
+  next to the located ffmpeg, or via `OMNIFLUX_FFPROBE`. (HTML docs ship
+  with the release too — candor: mostly dead weight, kept because they come
+  with the archive.)
 - `OMNIFLUX_FFMPEG` env var overrides the location for any local setup.
 - Build used by all spike numbers recorded in the Task Note:
   `N-128718-gb2b543c079-20261109`.

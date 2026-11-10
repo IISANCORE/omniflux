@@ -2,6 +2,12 @@
 //! measure the honest numbers: time-to-first-frame, per-frame latency
 //! percentiles, pipe throughput.
 //!
+//! The `seek` mode extends this to warm scrubbing: one long-lived decoder fed
+//! keyframes over stdin (see `warm.rs`), measured against the cold
+//! spawn-per-jump baseline on the same frames. The map of keyframe byte
+//! positions comes from ffprobe (`index.rs`); the AVCC→Annex-B conversion the
+//! decoder needs is pure Rust byte work (`annexb.rs`).
+//!
 //! Spikes don't accrete: this either graduates into the real engine or dies.
 //! It must stay readable enough that its numbers are believable — per
 //! codebreaker Law 6, every number printed here was MEASURED, not hoped for.
@@ -10,6 +16,10 @@
 //! pipe (zero FFI, zero unsafe, GPL runtime kept outside the build's crate
 //! graph). The production engine may revisit bindings later; that decision
 //! needs this spike's numbers first.
+
+pub mod annexb;
+pub mod index;
+pub mod warm;
 
 use std::io::{BufReader, Read, Seek};
 use std::path::{Path, PathBuf};
@@ -263,8 +273,10 @@ pub fn run_pipeline(spec: &PipelineSpec, ffmpeg: &Path) -> Result<Summary, Spike
     })
 }
 
-/// FNV-1a, so a checksum needs no dependency (Law 4).
-fn fnv1a(data: &[u8]) -> u32 {
+/// FNV-1a, so a checksum needs no dependency (Law 4). Public because the
+/// seek spike and its integration test compare frame witnesses across two
+/// different decode paths — one shared definition, no copies.
+pub fn fnv1a(data: &[u8]) -> u32 {
     let mut hash: u32 = 0x811c_9dc5;
     for &b in data {
         hash ^= u32::from(b);
@@ -283,7 +295,7 @@ fn percentile(times: &[u128], q: f64) -> f64 {
     sorted[idx] as f64
 }
 
-fn read_stderr_tail(path: &Path) -> String {
+pub(crate) fn read_stderr_tail(path: &Path) -> String {
     let len = std::fs::metadata(path).map(|m| m.len() as i64).unwrap_or(0);
     let tail = len.min(1024);
     let mut s = String::new();
@@ -302,29 +314,54 @@ pub fn generate_test_clip(
     frames: usize,
     scale: (u32, u32),
 ) -> Result<(), SpikeError> {
+    generate_test_clip_gop(ffmpeg, out_path, frames, scale, None)
+}
+
+/// [`generate_test_clip`] plus an optional GOP length: `Some(g)` forces a
+/// keyframe every `g` frames (the dense-checkpoint footage the scrub story
+/// relies on), `None` keeps x264's default (~8 s sparse GOPs on our clips).
+pub fn generate_test_clip_gop(
+    ffmpeg: &Path,
+    out_path: &Path,
+    frames: usize,
+    scale: (u32, u32),
+    gop: Option<u32>,
+) -> Result<(), SpikeError> {
     let stderr_path = std::env::temp_dir().join("omniflux-spike-ffmpeg-gen.log");
     let stderr_file = std::fs::File::create(&stderr_path).map_err(SpikeError::Io)?;
+    let mut args: Vec<String> = vec![
+        "-hide_banner".into(),
+        "-loglevel".into(),
+        "error".into(),
+        "-nostdin".into(),
+        "-f".into(),
+        "lavfi".into(),
+        "-i".into(),
+        format!("testsrc2=size={}x{}:rate=30", scale.0, scale.1),
+        "-frames:v".into(),
+        frames.to_string(),
+        // libx264 = the GPL codec reality: documented, stays OUTSIDE the
+        // Rust build, reachable only if the application shells out.
+        "-c:v".into(),
+        "libx264".into(),
+        "-crf".into(),
+        "28".into(),
+    ];
+    if let Some(g) = gop {
+        // Dense, scene-independent checkpoints (same recipe the seek
+        // measurements used): every `g` frames is a keyframe.
+        args.extend([
+            "-g".into(),
+            g.to_string(),
+            "-keyint_min".into(),
+            g.to_string(),
+            "-sc_threshold".into(),
+            "0".into(),
+        ]);
+    }
+    args.extend(["-y".into(), out_path.to_string_lossy().into_owned()]);
     let status = Command::new(ffmpeg)
-        .args([
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-nostdin",
-            "-f",
-            "lavfi",
-            "-i",
-            &format!("testsrc2=size={}x{}:rate=30", scale.0, scale.1),
-            "-frames:v",
-            &frames.to_string(),
-            // libx264 = the GPL codec reality: documented, stays OUTSIDE the
-            // Rust build, reachable only if the application shells out.
-            "-c:v",
-            "libx264",
-            "-crf",
-            "28",
-            "-y",
-            &out_path.to_string_lossy(),
-        ])
+        .args(&args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::from(stderr_file))

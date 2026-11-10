@@ -14,7 +14,7 @@ crates/
   omniflux-core/     the engine's root crate: vocabulary every crate may depend on
 spikes/
   playback/          benchmark workbench: ffmpeg -> frames, prints measured numbers
-test-media/          small clips used by the spike's integration test
+test-media/          local clips for manual runs (gitignored — the tests generate their own)
 tools/               helper binaries and how to reproduce them
 ```
 
