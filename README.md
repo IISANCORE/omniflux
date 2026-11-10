@@ -185,6 +185,11 @@ What the format guarantees:
   than half-read, and a broken file names the place that is wrong
   (`tracks[0].clips[2].start: expected a number, found null`).
 
+Known limit: the file remembers *where* the footage was, it does not search
+for it. Move a project and its media together and everything still opens;
+move the footage alone and the project opens with the arrangement intact
+but the missing files to relink (a relink screen is not built yet).
+
 Measured (2026-11-10, release profile, this dev machine — each project
 started with that many clips and then had 5 000 edits applied):
 

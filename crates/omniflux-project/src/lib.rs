@@ -11,6 +11,10 @@
 //! itself knows only lengths and ids; a project file knows paths, because
 //! that is what a file is for.
 //!
+//! Known limit: the file remembers where the footage WAS, it does not search
+//! for it. A project whose files have moved opens with the arrangement
+//! intact and the missing files to relink — relinking is not built yet.
+//!
 //! ```no_run
 //! use omniflux_project::Project;
 //! use std::path::Path;
