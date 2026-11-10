@@ -24,7 +24,8 @@ it ships. Nothing hidden, nothing fake, no cleverness for cleverness's sake.
 crates/
   omniflux-core/        the engine's root crate: vocabulary every crate may depend on
 spikes/
-  playback/             benchmark workbench: decode-to-frame pipeline + warm-scrub seek mode
+  playback/             decode-to-frame pipeline + warm-scrub seek mode
+  timeline/             the timeline model measured under load: edit cost, undo cost
 ```
 
 Where a new feature belongs, and which crate owns what:
@@ -105,6 +106,44 @@ playback pipeline already measured (≈6 ms/frame at 1080p). So the next scrub
 lever is **preview resolution**, not a faster decoder — and mid-GOP positions
 still need the frames in between, which is what dense-GOP scrub proxies are
 for. Keyframe jumps only, for now.
+
+## The timeline model — the arrangement an editor edits
+
+The engine's core crate now holds the thing an editor actually edits: where
+material sits, for how long, on which track, measured on one exact clock.
+
+- **Exact time, not floats.** Every position is a count of *ticks* on a
+  project timebase of 90 000 ticks per second — which divides exactly by 24,
+  25, 30, 50 and 60 fps, so a frame is always a whole number of ticks and
+  "the clip does not line up with the audio" is not a bug waiting to happen.
+- **The model enforces its own rules.** Clips on one track never overlap, a
+  clip never runs past the end of its source, a clip always lasts more than
+  zero. A refused edit changes nothing at all.
+- **Edits are commands that know how to undo themselves.** Applying an edit
+  *returns* the command that undoes it, so undo and redo are one operation
+  with two stacks — there is no second copy of "undo" to drift out of step.
+
+Measured (2026-11-10, release profile, this dev machine): 500 clips on 4
+tracks, 5 000 edits, then every edit undone and redone.
+
+| what | measured |
+|---|---|
+| build 500 clips | 0.1 ms (0.1 µs/clip) |
+| one edit | p50 **0.001 ms**, p95 0.002 ms (~1M edits/s) |
+| one undo / redo | p50 0.001 ms (5 000 undos in 5.3 ms) |
+| one undoable edit in RAM | **98 bytes** → 9 MB for 100 000 undo steps |
+| one clip in RAM | ~155 bytes (500-clip project: 4 MB resident) |
+| undoing everything | **restores the project exactly** (and so does redo) |
+
+What those numbers decide: the edit machinery will never be what makes the
+editor feel slow (an edit is ~1 µs; a frame is 16 ms), "unlimited undo" fits
+inside the 4 GB budget (9 MB per 100 000 steps), and a project with hundreds
+of clips is small (~4 MB). The heavy part of the memory budget is the decode
+side, not the model — which the RAM census still has to measure.
+
+```
+cargo run --release -p timeline-spike -- [clips] [edits]
+```
 
 ## License
 OmniFlux is free software under the **GNU GPL v3.0 or later** — the full text
