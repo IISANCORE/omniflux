@@ -1,0 +1,20 @@
+[package]
+name = "omniflux-project"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+# workspace-internal crate: OmniFlux ships as a product, not as a crates.io
+# package, so publish = false states that and blocks accidental `cargo
+# publish` (kept unchanged across the GPL-3.0-or-later decision, 2026-11-09).
+publish = false
+
+[dependencies]
+# omniflux-core: the timeline model this crate reads and writes — the thing
+# a project file IS (workspace-internal).
+omniflux-core = { path = "../omniflux-core" }
+# serde_json: reading and writing the .omni project file. Chosen over a
+# hand-rolled JSON parser for the same reason the spike does not parse mp4
+# itself: a parser is exactly where subtle bugs hide, and this one is
+# battle-tested. Used through its Value API (no derive), so the dependency
+# tree stays at a handful of small MIT/Apache crates and no proc macros.
+serde_json = "1"
