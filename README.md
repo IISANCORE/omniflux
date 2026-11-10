@@ -33,6 +33,7 @@ crates/
 spikes/
   playback/             decode-to-frame pipeline + warm-scrub seek mode
   timeline/             the timeline model measured under load: edit cost, undo cost
+  census/               the RAM census: what the engine actually uses, in one table
 ```
 
 Where a new feature belongs, and which crate owns what:
@@ -210,6 +211,40 @@ milliseconds. At **150 bytes per clip** (measured exactly), a 50 000-clip
 project would be ~7.5 MB of text and a few hundred milliseconds to open —
 that is where a binary format would start to earn its keep, and the version
 header is there to make that switch possible without losing files.
+
+## What does OmniFlux actually use? — the RAM census
+
+One command measures the engine's whole memory footprint and prints one
+table with a verdict:
+
+```
+cargo run --release -p census-spike
+```
+
+Measured (2026-11-10, release profile, **dev machine**: Windows, 12 cores,
+7.7 GB RAM — three runs, stable):
+
+| part | measured |
+|---|---|
+| our process, empty | 4.3 MB |
+| our process, 500-clip project + 5 000 edits | 4.8 MB |
+| &nbsp;&nbsp;of which the project and the history | 0.47 MB |
+| decoder working, 1920×1080 | **210 MB** |
+| decoder working, 640×360 (proxy) | **57 MB** |
+| project file on disk (500 clips) | 75 KB (150 B/clip) |
+| projected editor total (ours + a proxy decoder, no renderer yet) | **62 MB** |
+
+What it decides: the **arrangement is cheap** (a 500-clip project with 5 000
+edits of history costs half a megabyte) and the **decode is the budget**
+(210 MB at 1080p, 57 MB at proxy resolution). The one part of the pipeline
+that can grow without limit is the **frame queue** — one 1080p frame is
+5.9 MB, so a hundred queued frames are 593 MB. Bounding that queue, and
+previewing at proxy resolution, is the work that takes this down to a 4 GB
+machine.
+
+This is the **baseline** for that work: every number here can be re-measured
+and compared. It runs on the dev machine for now — the pillar's 4 GB is the
+destination, and this table is the "before" column.
 
 ## License
 OmniFlux is free software under the **GNU GPL v3.0 or later** — the full text
