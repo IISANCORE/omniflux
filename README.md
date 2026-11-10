@@ -131,9 +131,12 @@ tracks, 5 000 edits, then every edit undone and redone.
 | build 500 clips | 0.1 ms (0.1 µs/clip) |
 | one edit | p50 **0.001 ms**, p95 0.002 ms (~1M edits/s) |
 | one undo / redo | p50 0.001 ms (5 000 undos in 5.3 ms) |
-| one undoable edit in RAM | **98 bytes** → 9 MB for 100 000 undo steps |
-| one clip in RAM | ~155 bytes (500-clip project: 4 MB resident) |
+| one undoable edit in RAM | **~100 bytes** → ~10 MB for 100 000 undo steps |
+| one clip in RAM | ~140 bytes (500-clip project: 4 MB resident) |
 | undoing everything | **restores the project exactly** (and so does redo) |
+
+(The two memory figures come from resident-memory deltas, so they move in
+pages — good enough to decide a design, not to quote to three decimals.)
 
 What those numbers decide: the edit machinery will never be what makes the
 editor feel slow (an edit is ~1 µs; a frame is 16 ms), "unlimited undo" fits
