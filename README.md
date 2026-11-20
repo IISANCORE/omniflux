@@ -29,7 +29,9 @@ it ships. Nothing hidden, nothing fake, no cleverness for cleverness's sake.
 ```
 crates/
   omniflux-core/        the engine's root crate: vocabulary every crate may depend on
+  omniflux-playback/    the decode side: ffmpeg sidecar, index, warm decoder, Player
   omniflux-project/     the .omni project file: saving a project and opening it again
+  omniflux-ui/          the prototype window (draft code, no final branding or UI yet)
 spikes/
   playback/             decode-to-frame pipeline + warm-scrub seek mode
   timeline/             the timeline model measured under load: edit cost, undo cost
@@ -251,6 +253,55 @@ machine.
 This is the **baseline** for that work: every number here can be re-measured
 and compared. It runs on the dev machine for now — the pillar's 4 GB is the
 destination, and this table is the "before" column.
+
+## The UI prototype — OmniFlux in front of a person
+
+`crates/omniflux-ui` puts the engine in a real window: a 1280×800 dark
+window (title: "OmniFlux — UI prototype", watermarked in the preview too)
+with a top bar (Open/path field/Save/Undo/Redo, Play/Pause/Frame −/+),
+a ruler + track strip, the frame under the playhead, and a status bar.
+It is a **prototype, not the product**: one video, no audio, no project
+opening, no final UI or branding. Everything a button does is a real
+engine call:
+
+- **Scrub** seeks the warm decoder to the frame under the pointer
+  (left/right arrows are "frame −/+"; Space plays/pauses; Ctrl+Z /
+  Ctrl+Shift+Z undo/redo; Ctrl+K splits at the playhead; Delete deletes;
+  Ctrl+S saves).
+- **Playback** steps forward one frame per frame-duration at the media's
+  fps; the status bar reports the measured "play X fps".
+- **Status bar** reports measured reality, not estimates: playhead/span
+  timecodes, resolution, reorder depth L, last decode latency + packets,
+  open-to-first-frame, fps, clip and undo/redo counts.
+
+Build and run (dev machine, debug profile — note the absolute paths in
+the `OMNIFLUX_*` tools convention of `tools/README.md`):
+
+```
+cargo build -p omniflux-ui -j 2
+Set-Location "C:\Users\Happysporuts content\Desktop\OmniFlux"
+target\debug\omniflux.exe test-media\spike-1080p-120f.mp4
+# or drag-and-drop any H.264 MP4 into the window
+```
+
+Measured (dev machine, debug build — rerun before quoting; machine note:
+these were taken on the owner's dev machine, 8 GB DDR4, iGPU):
+
+| what | measured |
+|---|---|
+| open → first frame (Player::open: probe + spawn + warm-up) | **~125 ms** (the status bar reports this number; three runs: 117–132 ms) |
+| live step (decode) at 1080p | **~7 ms** per frame in the debug build (the release engine spike: ~122 fps sustained, ~6 ms/frame, p95 8–9 ms) |
+| warm seek, dense GOP @1080p | **~16 ms** (spike table: ~17.8 ms p50) |
+| mid-GOP seek, sparse GOP @1080p | **~0.5–0.7 s** — the honest price of an exact frame: it decodes the frames between the keyframe and the target |
+| window RSS | **~126 MB** with the 1080p spike clip, **~111 MB** with the 720p clip (glow backend) |
+
+Two things these numbers connect: the fix in `5d11fb9` made seeks that
+land at a file's last frames (sparse GOPs, or past the end) return the
+last frame the protocol can release instead of erroring — that is what
+scrubbing to the end of a clip now does. And the spawn/open removal that
+made warm seeks fast is the spike's `5.4×` number; mid-GOP seeks in the
+UI pay that decode cost again (the sparse-GOP row above) — a dense-GOP
+proxy clip is the UI's lever for those.
 
 ## License
 OmniFlux is free software under the **GNU GPL v3.0 or later** — the full text
