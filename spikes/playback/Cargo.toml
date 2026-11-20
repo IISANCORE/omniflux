@@ -12,6 +12,10 @@ publish = false
 # engine primitives as they land.
 [dependencies]
 omniflux-core = { path = "../../crates/omniflux-core" }
+# omniflux-playback: the real decode crate. The spike measures it and
+# re-exports it, so the CLI and tests drive the same decoder the app does
+# (workspace-internal).
+omniflux-playback = { path = "../../crates/omniflux-playback" }
 
 [lib]
 name = "playback_spike"

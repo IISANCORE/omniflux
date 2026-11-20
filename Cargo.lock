@@ -28,6 +28,10 @@ name = "omniflux-core"
 version = "0.1.0"
 
 [[package]]
+name = "omniflux-playback"
+version = "0.1.0"
+
+[[package]]
 name = "omniflux-project"
 version = "0.1.0"
 dependencies = [
@@ -40,6 +44,7 @@ name = "playback-spike"
 version = "0.1.0"
 dependencies = [
  "omniflux-core",
+ "omniflux-playback",
 ]
 
 [[package]]

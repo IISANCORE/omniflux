@@ -1,12 +1,10 @@
-//! Playback spike pipeline — decode a media file into raw RGB24 frames and
-//! measure the honest numbers: time-to-first-frame, per-frame latency
-//! percentiles, pipe throughput.
+//! Playback spike — the measurement harness around the real decode crate.
 //!
-//! The `seek` mode extends this to warm scrubbing: one long-lived decoder fed
-//! keyframes over stdin (see `warm.rs`), measured against the cold
-//! spawn-per-jump baseline on the same frames. The map of keyframe byte
-//! positions comes from ffprobe (`index.rs`); the AVCC→Annex-B conversion the
-//! decoder needs is pure Rust byte work (`annexb.rs`).
+//! Decode a media file into raw RGB24 frames and measure the honest numbers:
+//! time-to-first-frame, per-frame latency percentiles, pipe throughput. The
+//! decoder itself now lives in `omniflux-playback` (it graduated out of this
+//! spike when the UI needed it); this crate measures that decoder and re-exports
+//! it so the CLI and integration tests keep driving the same code the app does.
 //!
 //! Spikes don't accrete: this either graduates into the real engine or dies.
 //! It must stay readable enough that its numbers are believable — per
@@ -17,66 +15,14 @@
 //! graph). The production engine may revisit bindings later; that decision
 //! needs this spike's numbers first.
 
-pub mod annexb;
-pub mod index;
 pub mod warm;
 
-use std::io::{BufReader, Read, Seek};
+pub use omniflux_playback::{annexb, fnv1a, index, locate_ffmpeg, probe_usable, read_stderr_tail};
+
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Instant;
-
-/// How the spike finds the FFmpeg binary, in order:
-/// 1. `OMNIFLUX_FFMPEG` env var (explicit override)
-/// 2. `<repo>/tools/ffmpeg/bin/ffmpeg.exe` (dev-machine local build, gitignored)
-/// 3. plain `ffmpeg` on PATH
-///
-/// Documented here in ONE place (Law 2: binary discovery should be an
-/// auditor-readable chain, not scattered path strings).
-pub fn locate_ffmpeg() -> Result<PathBuf, String> {
-    if let Ok(env_path) = std::env::var("OMNIFLUX_FFMPEG") {
-        let p = PathBuf::from(env_path);
-        if p.is_file() {
-            return Ok(p);
-        }
-        return Err(format!(
-            "OMNIFLUX_FFMPEG is set but the file does not exist: {}",
-            p.display()
-        ));
-    }
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let exe_name = if cfg!(windows) {
-        "ffmpeg.exe"
-    } else {
-        "ffmpeg"
-    };
-    let repo_tools = manifest
-        .join("..")
-        .join("..")
-        .join("tools")
-        .join("ffmpeg")
-        .join("bin")
-        .join(exe_name);
-    if repo_tools.is_file() {
-        return Ok(repo_tools);
-    }
-    Ok(PathBuf::from(exe_name))
-}
-
-/// Verifies a located binary can actually run. `locate_ffmpeg` cannot vouch
-/// for the PATH fallback (it does not exist-check PATH entries), so callers
-/// that need to *skip vs fail* ask this (tests do); spawners get a clean
-/// FfmpegMissing error either way.
-pub fn probe_usable(ffmpeg: &Path) -> bool {
-    Command::new(ffmpeg)
-        .arg("-version")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
 
 pub struct PipelineSpec {
     /// Media file to decode (the spike never reads anything but this).
@@ -273,18 +219,6 @@ pub fn run_pipeline(spec: &PipelineSpec, ffmpeg: &Path) -> Result<Summary, Spike
     })
 }
 
-/// FNV-1a, so a checksum needs no dependency (Law 4). Public because the
-/// seek spike and its integration test compare frame witnesses across two
-/// different decode paths — one shared definition, no copies.
-pub fn fnv1a(data: &[u8]) -> u32 {
-    let mut hash: u32 = 0x811c_9dc5;
-    for &b in data {
-        hash ^= u32::from(b);
-        hash = hash.wrapping_mul(0x0100_0193);
-    }
-    hash
-}
-
 fn percentile(times: &[u128], q: f64) -> f64 {
     if times.is_empty() {
         return 0.0;
@@ -293,17 +227,6 @@ fn percentile(times: &[u128], q: f64) -> f64 {
     sorted.sort_unstable();
     let idx = ((sorted.len() as f64) * q).min((sorted.len() - 1) as f64) as usize;
     sorted[idx] as f64
-}
-
-pub(crate) fn read_stderr_tail(path: &Path) -> String {
-    let len = std::fs::metadata(path).map(|m| m.len() as i64).unwrap_or(0);
-    let tail = len.min(1024);
-    let mut s = String::new();
-    if let Ok(mut f) = std::fs::File::open(path) {
-        let _ = f.seek(std::io::SeekFrom::End(-tail));
-        let _ = f.read_to_string(&mut s);
-    }
-    s
 }
 
 /// Generates a deterministic test clip (testsrc2 pattern) for spike runs.

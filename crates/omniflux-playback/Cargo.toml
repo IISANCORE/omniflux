@@ -1,0 +1,18 @@
+[package]
+name = "omniflux-playback"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+# workspace-internal crate: OmniFlux ships as a product, not as a crates.io
+# package, so publish = false states that and blocks accidental `cargo
+# publish` (kept unchanged across the GPL-3.0-or-later decision, 2026-11-09).
+publish = false
+
+# No dependencies: this crate is pure Rust byte work (Annex-B conversion, an
+# ffprobe CSV parser) and std process plumbing. FFmpeg itself is a SIDECAR —
+# a separate executable we talk to over pipes — so it never enters the build's
+# crate graph (decision recorded 2026-11-09; see ARCHITECTURE.md).
+
+[lib]
+name = "omniflux_playback"
+path = "src/lib.rs"
