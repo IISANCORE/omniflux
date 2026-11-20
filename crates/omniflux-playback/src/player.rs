@@ -195,22 +195,72 @@ impl Player {
         // the burst opens with L stale frames from the previous feed. The
         // target's output rank is therefore rank + L. Frames after it are
         // the film's next frames and are kept for stepping.
-        let feed_end = target + self.reorder_depth;
-        let packets = feed_end - keyframe + 1;
-        let rank = self.index.packets[keyframe..=feed_end]
-            .iter()
-            .filter(|packet| packet.pts_time < target_pts)
-            .count();
-        let keep_from = rank + self.reorder_depth;
+        let mut feed_end = target + self.reorder_depth;
+
+        // The guard can trip at an ordinary mid-file position too: with a
+        // sparse GOP the target's pts is among the feed's highest, so the
+        // burst ends before the target. Extend the feed one packet at a
+        // time while the guard trips — the burst grows with it and the
+        // target comes along — until the burst reaches the target.
+        let (packets, keep_from) = loop {
+            let packets = feed_end - keyframe + 1;
+            let rank = self.index.packets[keyframe..=feed_end]
+                .iter()
+                .filter(|packet| packet.pts_time < target_pts)
+                .count();
+            let keep_from = rank + self.reorder_depth;
+            if keep_from < packets || feed_end + 1 >= self.index.packets.len() {
+                break (packets, keep_from);
+            }
+            feed_end += 1;
+        };
+
+        let feed = build_feed(&mut self.file, &self.index, keyframe, packets)?;
+        let started = Instant::now();
+
         if keep_from >= packets {
-            return Err(format!(
-                "seek to {seconds:.3}s maps to output rank {keep_from} of a {packets}-packet \
-                 feed; the packet map and the decoder's reorder depth disagree"
+            // Even after extending to the file's last packet, the burst
+            // does not reach the target: the target is one of the final L
+            // frames of the file the protocol cannot release while the
+            // decoder lives (see the module comment). Rather than fail,
+            // return the last frame the burst gave us and report the
+            // film's real time for it: the burst is the feed's frames in
+            // presentation order, so its last frame is the one with the
+            // highest pts among the feed's packets.
+            let burst = self
+                .decoder
+                .feed_collect(&feed, packets, packets.saturating_sub(1))?;
+            if burst.stale_drained != 0 {
+                return Err(format!(
+                    "seek to {seconds:.3}s found {} frame(s) already queued before its feed — \
+                     the previous feed produced more frames than the protocol accounts for",
+                    burst.stale_drained
+                ));
+            }
+            let frame = burst.frames.into_iter().next_back().ok_or_else(|| {
+                format!("the decoder returned no frames for a seek to {seconds:.3}s")
+            })?;
+            let last_pts = self.index.packets[keyframe..=feed_end]
+                .iter()
+                .map(|packet| packet.pts_time)
+                .fold(f64::NEG_INFINITY, f64::max);
+            let film_index = self
+                .pts_sorted
+                .partition_point(|&pts| pts <= last_pts)
+                .saturating_sub(1)
+                .min(self.pts_sorted.len().saturating_sub(1));
+            self.fed_through = feed_end;
+            self.presentation_index = film_index;
+            self.pending.clear();
+            return Ok(DecodedFrame::from_burst(
+                frame,
+                self.pts_sorted[film_index],
+                started.elapsed(),
+                packets,
             ));
         }
-        let feed = build_feed(&mut self.file, &self.index, keyframe, packets)?;
 
-        let started = Instant::now();
+        // The common case: the burst reaches the target.
         let burst = self.decoder.feed_collect(&feed, packets, keep_from)?;
         let elapsed = started.elapsed();
         if burst.stale_drained != 0 {
