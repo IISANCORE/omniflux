@@ -1,0 +1,27 @@
+[package]
+name = "omniflux-ui"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+# Workspace-internal crate: OmniFlux ships as a product, not as a crates.io
+# package (same rule as every other member).
+publish = false
+
+# The window. eframe/egui is a PROTOTYPE choice, not a locked-in decision:
+# no engine crate depends on it, so replacing it later costs this crate only.
+# glow (OpenGL) instead of wgpu keeps the dependency tree and binary smaller;
+# default_fonts keeps the UI self-contained (no system font probing); x11
+# lets the Linux build open a window without a Wayland dev environment.
+[dependencies]
+eframe = { version = "0.37", default-features = false, features = [
+    "default_fonts",
+    "glow",
+    "x11",
+] }
+omniflux-core = { path = "../omniflux-core" }
+omniflux-playback = { path = "../omniflux-playback" }
+omniflux-project = { path = "../omniflux-project" }
+
+[[bin]]
+name = "omniflux"
+path = "src/main.rs"

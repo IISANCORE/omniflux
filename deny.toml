@@ -24,6 +24,13 @@ allow = [
     # OmniFlux itself, declared in the member manifests — repository LICENSE
     # carries the full GPL-3.0 text (decision landed 2026-11-09).
     "GPL-3.0-or-later",
+    # epaint_default_fonts (the bundled-font crate egui pulls in): the default
+    # UI font family is licensed with OFL-1.1 (the glyphs the prototype
+    # displays) and Ubuntu-font-1.0 (the Ubuntu face used for UI text). The
+    # fonts are part of the display of the product; the lock lists them only
+    # because the egui tree is new.
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
 ]
 # NOTE: until there are external dependencies every entry above is
 # "unused" — cargo-deny warns about that per run; the warnings stay ON,
