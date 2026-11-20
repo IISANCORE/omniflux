@@ -4,15 +4,22 @@
 //! (96.6 ms cold vs 17.8 ms warm at 1080p, pixel-identical); this module is
 //! the part that survived the experiment.
 //!
-//! Protocol (v0, keyframe jumps only — the unambiguous case). Let
-//! `L = ffprobe has_b_frames`, the decoder's reorder hold. A jump at a
-//! keyframe feeds that keyframe plus the L packets that follow it, as
+//! Protocol. Let `L = ffprobe has_b_frames`, the decoder's reorder hold. A
+//! keyframe jump feeds that keyframe plus the L packets that follow it, as
 //! self-contained Annex-B access units (parameter sets + AUD + sample, see
 //! `annexb.rs`), then reads L+1 frames and takes the LAST as the target.
 //! The first feed after spawning is the warm-up: it also reads one frame,
 //! which is that keyframe; from then on the decoder holds exactly L frames
-//! back, so every later burst is L held frames followed by the target.
+//! back, so every later burst is L stale frames followed by the new ones.
 //! Measured across x264 bf=0/1/2/3: L = has_b_frames exactly (0→0, 1→1, 2→2).
+//!
+//! Two facts that the `Player` relies on and this module must preserve:
+//! - The decoder emits in PRESENTATION order, not decode order. With
+//!   B-frames the packet at a decode index is not the frame at that
+//!   presentation position, so a mid-GOP seek selects its target by rank
+//!   among the emitted frames (`feed_collect`), not by "the last one".
+//! - Frames emitted after the target are the film's next frames. They are
+//!   returned, not discarded, so stepping into them costs nothing.
 //!
 //! Two FFmpeg details are load-bearing and were found by measurement:
 //! - `-flags low_delay` MUST precede `-i`. Without it FFmpeg demuxes later
@@ -37,12 +44,12 @@
 //!   Closing stdin reaches the real binary whatever sits in front of it.
 //!
 //! Honest limits, stated up front:
-//! - Cases are KEYFRAME timestamps only. Mid-GOP jumps (the typical scrub
-//!   position) still require decoding the frames in between; this spike
-//!   measures the spawn/open overhead being removed, which is the part a
-//!   warm engine can remove. Dense keyframes (proxies) remain the lever for
-//!   the in-between frames.
-//! - Keyframes are intra-coded, so the target's pixels do not depend on the
+//! - The spike's measured table jumps at KEYFRAME timestamps only. A mid-GOP
+//!   seek is supported by [`crate::player`] but costs one decoded packet per
+//!   frame between the keyframe and the target — that is the honest price of
+//!   an exact frame. Dense keyframes (proxies) remain the lever for scrub
+//!   latency.
+//! - A keyframe is intra-coded, so the target's pixels do not depend on the
 //!   L following packets; those are fed only to push the target out of the
 //!   reorder buffer. The pixel witness checks that claim on every jump.
 //! - Frames already queued before a feed is written are counted as
@@ -84,6 +91,25 @@ pub struct Burst {
     /// every jump).
     pub frames_read: usize,
     /// From starting to write the feed to the last frame arriving.
+    pub elapsed: Duration,
+    /// Frames already queued before this feed was written. Must stay 0.
+    pub stale_drained: usize,
+}
+
+/// A feed's output from a chosen frame onward.
+///
+/// The decoder emits frames in PRESENTATION order, and with B-frames the
+/// packet at a given decode index is not the frame at that presentation
+/// position. A seek therefore has to name the output it wants by rank among
+/// the frames the feed produces — and keep the frames that follow it, because
+/// they are the next frames of the film, not waste.
+pub struct BurstFrames {
+    /// Frames from the requested rank to the end of the burst, in
+    /// presentation order.
+    pub frames: Vec<Frame>,
+    /// How many frames the decoder emitted in total for this feed.
+    pub frames_read: usize,
+    /// From writing the feed to the last frame arriving.
     pub elapsed: Duration,
     /// Frames already queued before this feed was written. Must stay 0.
     pub stale_drained: usize,
@@ -231,15 +257,72 @@ impl WarmDecoder {
     /// Sends the first feed and reads the ONE frame it emits. Leaves the
     /// decoder holding L frames — the steady state every jump assumes.
     pub fn warm_up(&mut self, feed: &[u8]) -> Result<Burst, String> {
-        self.send_and_read(feed, 1)
+        self.feed(feed, 1)
     }
 
     /// Sends one jump feed and reads L+1 frames; the last is the target.
     pub fn jump(&mut self, feed: &[u8]) -> Result<Burst, String> {
-        self.send_and_read(feed, self.reorder_depth + 1)
+        self.feed(feed, self.reorder_depth + 1)
     }
 
-    fn send_and_read(&mut self, feed: &[u8], frames_wanted: usize) -> Result<Burst, String> {
+    /// Sends one self-contained feed and reads exactly `frames_wanted`
+    /// frames, returning the last.
+    ///
+    /// The steady-state rule this rests on: after warm-up the decoder holds
+    /// L frames, so feeding N packets emits N frames and the last one is the
+    /// frame L before the end of the feed in presentation order. A seek that
+    /// wants packet `t` therefore feeds through `t + L`; sequential playback
+    /// feeds one packet and reads one frame.
+    pub fn feed(&mut self, feed: &[u8], frames_wanted: usize) -> Result<Burst, String> {
+        if frames_wanted == 0 {
+            return Err("a feed must request at least one frame".to_string());
+        }
+        let mut collected = self.feed_collect(feed, frames_wanted, frames_wanted - 1)?;
+        let frame = collected
+            .frames
+            .pop()
+            .ok_or_else(|| "a feed must request at least one frame".to_string())?;
+        Ok(Burst {
+            frame,
+            frames_read: collected.frames_read,
+            elapsed: collected.elapsed,
+            stale_drained: collected.stale_drained,
+        })
+    }
+
+    /// Sends one feed and reads exactly `frames_wanted` frames, keeping the
+    /// output from rank `keep_from` onward (ranks are in the order the
+    /// decoder emits them: presentation order, stale frames first).
+    ///
+    /// A seek uses this because the target is not simply the last frame of
+    /// the burst: with B-frames, the packets fed after the target can belong
+    /// before it in presentation order, and the frames that follow the target
+    /// are the film's next frames — keeping them saves decoding them twice.
+    /// Earlier frames are dropped as they arrive, never buffered, so a long
+    /// GOP does not turn into a long Vec.
+    pub fn feed_collect(
+        &mut self,
+        feed: &[u8],
+        frames_wanted: usize,
+        keep_from: usize,
+    ) -> Result<BurstFrames, String> {
+        if frames_wanted == 0 {
+            return Err("a feed must request at least one frame".to_string());
+        }
+        if keep_from >= frames_wanted {
+            return Err(format!(
+                "keep_from {keep_from} must be less than the {frames_wanted} frames requested"
+            ));
+        }
+        self.send_and_read(feed, frames_wanted, keep_from)
+    }
+
+    fn send_and_read(
+        &mut self,
+        feed: &[u8],
+        frames_wanted: usize,
+        keep_from: usize,
+    ) -> Result<BurstFrames, String> {
         let stale_drained = self.drain_stale()?;
 
         let started = Instant::now();
@@ -258,17 +341,19 @@ impl WarmDecoder {
                 )
             })?;
 
-        let mut read = 0usize;
-        let mut last: Option<Frame> = None;
-        for _ in 0..frames_wanted {
+        let mut frames = Vec::with_capacity(frames_wanted - keep_from);
+        let mut last_arrived = started;
+        for index in 0..frames_wanted {
             match self.frames.recv_timeout(JUMP_TIMEOUT) {
                 Ok(frame) => {
-                    read += 1;
-                    last = Some(frame);
+                    last_arrived = frame.arrived;
+                    if index >= keep_from {
+                        frames.push(frame);
+                    }
                 }
                 Err(e) => {
                     return Err(format!(
-                        "warm decoder delivered only {read}/{frames_wanted} frames within {} s \
+                        "warm decoder delivered only {index}/{frames_wanted} frames within {} s \
                          ({e}); feed was {} bytes; stderr tail: {}",
                         JUMP_TIMEOUT.as_secs(),
                         feed.len(),
@@ -277,11 +362,10 @@ impl WarmDecoder {
                 }
             }
         }
-        let frame = last.ok_or_else(|| "a feed must request at least one frame".to_string())?;
-        Ok(Burst {
-            elapsed: frame.arrived.duration_since(started),
-            frame,
-            frames_read: read,
+        Ok(BurstFrames {
+            frames,
+            frames_read: frames_wanted,
+            elapsed: last_arrived.duration_since(started),
             stale_drained,
         })
     }

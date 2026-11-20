@@ -63,6 +63,69 @@ impl MediaIndex {
             .map(|(index, _)| index)
             .collect()
     }
+
+    /// The packet on screen at `seconds`: the last one whose presentation
+    /// time is not after it. Packets are in decode order, so this is a scan,
+    /// not a binary search — a thousand packets is nothing, and correctness
+    /// with B-frames matters more than the microseconds.
+    pub fn packet_at(&self, seconds: f64) -> usize {
+        let mut best: Option<(usize, f64)> = None;
+        for (index, packet) in self.packets.iter().enumerate() {
+            if packet.pts_time <= seconds && best.is_none_or(|(_, pts)| packet.pts_time > pts) {
+                best = Some((index, packet.pts_time));
+            }
+        }
+        // Before the first frame's timestamp, the first frame is what is on
+        // screen — the alternative is "no image", which is not true.
+        best.map(|(index, _)| index).unwrap_or(0)
+    }
+
+    /// The nearest keyframe at or before `index`, in decode order.
+    ///
+    /// Every seek must start here: a keyframe is the only place the decoder
+    /// can begin without the frames that came before it.
+    pub fn keyframe_at_or_before(&self, index: usize) -> usize {
+        (0..=index.min(self.packets.len().saturating_sub(1)))
+            .rev()
+            .find(|&candidate| self.packets[candidate].keyframe)
+            .unwrap_or(0)
+    }
+
+    /// How long one frame is shown, in seconds: the median gap between
+    /// presentation times. The median, not the mean, so one odd timestamp
+    /// cannot change the answer.
+    pub fn frame_duration(&self) -> f64 {
+        let mut times: Vec<f64> = self.packets.iter().map(|packet| packet.pts_time).collect();
+        if times.len() < 2 {
+            return 1.0 / 30.0;
+        }
+        times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let mut gaps: Vec<f64> = times
+            .windows(2)
+            .map(|pair| pair[1] - pair[0])
+            .filter(|gap| *gap > 0.0)
+            .collect();
+        if gaps.is_empty() {
+            return 1.0 / 30.0;
+        }
+        gaps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        gaps[gaps.len() / 2]
+    }
+
+    /// The presentation length of the file: the last frame's time plus the
+    /// time that frame is shown.
+    pub fn duration_seconds(&self) -> f64 {
+        let last = self
+            .packets
+            .iter()
+            .map(|packet| packet.pts_time)
+            .fold(f64::NEG_INFINITY, f64::max);
+        if last.is_finite() {
+            last + self.frame_duration()
+        } else {
+            0.0
+        }
+    }
 }
 
 /// The stream facts one `ffprobe -show_streams -show_data` run provides.
@@ -389,6 +452,71 @@ mod tests {
             },
         };
         assert_eq!(index.keyframe_indices(), vec![0, 2]);
+    }
+
+    /// A small index for the pure time questions below: four frames 40 ms
+    /// apart, with keyframes at packets 0 and 2.
+    fn four_frames() -> MediaIndex {
+        let packets =
+            parse_packet_csv("0.000,10,0,K__\n0.040,5,10,___\n0.080,9,15,K__\n0.120,5,24,___\n")
+                .expect("csv must parse");
+        MediaIndex {
+            width: 2,
+            height: 2,
+            has_b_frames: 0,
+            packets,
+            avc: AvcConfig {
+                nal_length_size: 4,
+                sps: Vec::new(),
+                pps: Vec::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn a_time_between_frames_shows_the_frame_before_it() {
+        let index = four_frames();
+        assert_eq!(index.packet_at(0.0), 0, "exactly on a frame is that frame");
+        assert_eq!(
+            index.packet_at(0.039),
+            0,
+            "between frames is the earlier one"
+        );
+        assert_eq!(index.packet_at(0.040), 1);
+        assert_eq!(index.packet_at(99.0), 3, "past the end is the last frame");
+        assert_eq!(
+            index.packet_at(-5.0),
+            0,
+            "before the start is the first frame"
+        );
+    }
+
+    #[test]
+    fn a_seek_starts_at_the_nearest_keyframe_at_or_before_the_target() {
+        let index = four_frames();
+        assert_eq!(index.keyframe_at_or_before(0), 0);
+        assert_eq!(
+            index.keyframe_at_or_before(1),
+            0,
+            "no keyframe between 0 and 1"
+        );
+        assert_eq!(index.keyframe_at_or_before(2), 2);
+        assert_eq!(index.keyframe_at_or_before(3), 2);
+    }
+
+    #[test]
+    fn the_frame_duration_is_the_median_gap_between_frames() {
+        let index = four_frames();
+        let duration = index.frame_duration();
+        assert!(
+            (duration - 0.040).abs() < 1e-9,
+            "expected 40 ms, measured {duration}"
+        );
+        let total = index.duration_seconds();
+        assert!(
+            (total - 0.160).abs() < 1e-9,
+            "expected the last frame's time plus one frame, measured {total}"
+        );
     }
 
     /// The real `extradata=` hexdump ffprobe printed for our test clip.

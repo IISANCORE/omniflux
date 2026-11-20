@@ -28,6 +28,7 @@
 
 pub mod annexb;
 pub mod index;
+pub mod player;
 pub mod warm;
 
 use std::path::{Path, PathBuf};
