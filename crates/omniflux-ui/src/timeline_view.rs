@@ -15,6 +15,10 @@ use eframe::egui::{self, pos2, vec2, Align2, Color32, FontId, Rect, Sense, Strok
 use omniflux_core::time::{Ticks, Timebase};
 use omniflux_core::timeline::{ClipId, Timeline};
 
+use crate::colors::{
+    ACCENT, BG_PANEL, BG_VIEWPORT, BORDER, CLIP_BLOCK, CLIP_TOP_EDGE, TEXT_PRIMARY, TEXT_SECONDARY,
+    TRACK_LANE,
+};
 use crate::time_text;
 
 const LABEL_WIDTH: f32 = 96.0;
@@ -46,7 +50,7 @@ pub fn show(
     let height = RULER_HEIGHT + TRACK_HEIGHT + PAD * 2.0;
     let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::click_and_drag());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 0.0, Color32::from_gray(18));
+    painter.rect_filled(rect, 0.0, BG_VIEWPORT);
 
     let timebase = timeline.timebase();
     let span = span.max(Ticks(1));
@@ -67,7 +71,7 @@ pub fn show(
     painter.rect_filled(
         Rect::from_min_max(rect.left_top(), pos2(track_left, rect.bottom())),
         0.0,
-        Color32::from_gray(21),
+        BG_PANEL,
     );
     let track_name = timeline
         .tracks()
@@ -79,7 +83,7 @@ pub fn show(
         Align2::LEFT_CENTER,
         track_name,
         FontId::proportional(12.0),
-        Color32::from_gray(200),
+        TEXT_PRIMARY,
     );
 
     // The ruler.
@@ -95,25 +99,20 @@ pub fn show(
         let x = track_left + (seconds as f32) * pixels_per_second;
         painter.line_segment(
             [pos2(x, rect.top() + 3.0), pos2(x, row_top)],
-            Stroke::new(1.0, Color32::from_gray(45)),
+            Stroke::new(1.0, BORDER),
         );
         painter.text(
             pos2(x + 4.0, rect.top() + 2.0),
             Align2::LEFT_TOP,
             time_text::format_ruler(seconds, step),
             FontId::proportional(10.0),
-            Color32::from_gray(150),
+            TEXT_SECONDARY,
         );
     }
 
     // The track bed.
-    painter.rect_filled(row_rect, 0.0, Color32::from_gray(23));
-    painter.rect_stroke(
-        row_rect,
-        0.0,
-        Stroke::new(1.0, Color32::from_gray(40)),
-        StrokeKind::Inside,
-    );
+    painter.rect_filled(row_rect, 0.0, TRACK_LANE);
+    painter.rect_stroke(row_rect, 0.0, Stroke::new(1.0, BORDER), StrokeKind::Inside);
 
     // The clips.
     for clip in timeline
@@ -128,32 +127,28 @@ pub fn show(
             pos2((x1 - 1.0).max(x0 + 2.0), row_rect.bottom() - 4.0),
         );
         let is_selected = Some(clip.id) == selected;
-        let fill = if is_selected {
-            Color32::from_rgb(62, 108, 168)
-        } else {
-            Color32::from_rgb(50, 68, 94)
-        };
-        painter.rect_filled(clip_rect, 4.0, fill);
+        painter.rect_filled(clip_rect, 4.0, CLIP_BLOCK);
         painter.rect_stroke(
             clip_rect,
             4.0,
-            Stroke::new(
-                1.0,
-                if is_selected {
-                    Color32::from_rgb(150, 190, 240)
-                } else {
-                    Color32::from_rgb(90, 120, 160)
-                },
-            ),
+            Stroke::new(1.0, CLIP_TOP_EDGE),
             StrokeKind::Inside,
         );
+        if is_selected {
+            painter.rect_stroke(
+                clip_rect,
+                4.0,
+                Stroke::new(2.0, ACCENT),
+                StrokeKind::Outside,
+            );
+        }
         let clip_painter = painter.with_clip_rect(clip_rect);
         clip_painter.text(
             clip_rect.left_top() + vec2(6.0, 5.0),
             Align2::LEFT_TOP,
             format!("Clip {}", clip.id.0),
             FontId::proportional(12.0),
-            Color32::WHITE,
+            TEXT_PRIMARY,
         );
         clip_painter.text(
             clip_rect.left_bottom() + vec2(6.0, -5.0),
@@ -164,7 +159,7 @@ pub fn show(
                 time_text::format_clock(timebase.to_seconds(clip.end()))
             ),
             FontId::monospace(10.0),
-            Color32::from_gray(190),
+            TEXT_SECONDARY,
         );
     }
 
@@ -176,13 +171,9 @@ pub fn show(
             pos2(playhead_x, rect.top()),
             pos2(playhead_x, rect.bottom() - PAD),
         ],
-        Stroke::new(2.0, Color32::from_rgb(235, 92, 72)),
+        Stroke::new(2.0, ACCENT),
     );
-    painter.circle_filled(
-        pos2(playhead_x, rect.top() + 4.0),
-        4.0,
-        Color32::from_rgb(235, 92, 72),
-    );
+    painter.circle_filled(pos2(playhead_x, rect.top() + 4.0), 4.0, ACCENT);
 
     let mut outcome = Outcome::default();
     if response.clicked() || response.dragged() {

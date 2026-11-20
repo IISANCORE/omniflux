@@ -22,6 +22,10 @@ use omniflux_core::timeline::{Clip, ClipId, MediaId, Timeline, TrackKind};
 use omniflux_playback::player::DecodedFrame;
 use omniflux_project::Project;
 
+use crate::colors::{
+    ACCENT, ALERT_RED, BG_TOOLBAR, BG_VIEWPORT, TEXT_DISABLED, TEXT_ON_ACCENT, TEXT_PRIMARY,
+    TEXT_SECONDARY,
+};
 use crate::edit_actions;
 use crate::media::{FrameImage, MediaSession};
 use crate::preview;
@@ -542,10 +546,13 @@ impl OmniFluxApp {
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         ui.add_space(2.0);
         ui.horizontal(|ui| {
-            ui.label(RichText::new("OmniFlux").strong());
-            ui.label(RichText::new("UI prototype").small().weak());
+            ui.label(RichText::new("OmniFlux").strong().color(TEXT_PRIMARY));
+            ui.label(RichText::new("UI prototype").small().color(TEXT_DISABLED));
             ui.separator();
-            if ui.button("Open video").clicked() {
+            if ui
+                .button(RichText::new("Open video").color(TEXT_PRIMARY))
+                .clicked()
+            {
                 self.open_from_input();
             }
             let path_width = (ui.available_width() - 240.0).clamp(160.0, 560.0);
@@ -555,21 +562,30 @@ impl OmniFluxApp {
                     .desired_width(path_width),
             );
             if ui
-                .add_enabled(self.media.is_some(), egui::Button::new("Save .omni"))
+                .add_enabled(
+                    self.media.is_some(),
+                    egui::Button::new(RichText::new("Save .omni").color(TEXT_PRIMARY)),
+                )
                 .on_hover_text("Ctrl+S")
                 .clicked()
             {
                 self.save();
             }
             if ui
-                .add_enabled(self.history.undo_depth() > 0, egui::Button::new("Undo"))
+                .add_enabled(
+                    self.history.undo_depth() > 0,
+                    egui::Button::new(RichText::new("Undo").color(TEXT_PRIMARY)),
+                )
                 .on_hover_text("Ctrl+Z")
                 .clicked()
             {
                 self.undo();
             }
             if ui
-                .add_enabled(self.history.redo_depth() > 0, egui::Button::new("Redo"))
+                .add_enabled(
+                    self.history.redo_depth() > 0,
+                    egui::Button::new(RichText::new("Redo").color(TEXT_PRIMARY)),
+                )
                 .on_hover_text("Ctrl+Shift+Z")
                 .clicked()
             {
@@ -578,23 +594,37 @@ impl OmniFluxApp {
         });
         ui.horizontal(|ui| {
             let has_media = self.media.is_some();
-            let play_label = if self.playing { "Pause" } else { "Play" };
-            if ui
-                .add_enabled(has_media, egui::Button::new(play_label))
-                .on_hover_text("Space")
-                .clicked()
-            {
+            let playing = self.playing;
+            let mut play = egui::Button::new(
+                RichText::new(if playing { "Pause" } else { "Play" }).color(if playing {
+                    TEXT_ON_ACCENT
+                } else {
+                    TEXT_PRIMARY
+                }),
+            );
+            if playing {
+                // The spec's "active tool icon" is the ▶/⏸ button while playing.
+                play = play.fill(ACCENT);
+            }
+            let response = ui.add_enabled(has_media, play).on_hover_text("Space");
+            if response.clicked() {
                 self.toggle_play();
             }
             if ui
-                .add_enabled(has_media, egui::Button::new("Frame −"))
+                .add_enabled(
+                    has_media,
+                    egui::Button::new(RichText::new("Frame −").color(TEXT_PRIMARY)),
+                )
                 .on_hover_text("Left arrow")
                 .clicked()
             {
                 self.step(-1);
             }
             if ui
-                .add_enabled(has_media, egui::Button::new("Frame +"))
+                .add_enabled(
+                    has_media,
+                    egui::Button::new(RichText::new("Frame +").color(TEXT_PRIMARY)),
+                )
                 .on_hover_text("Right arrow")
                 .clicked()
             {
@@ -603,14 +633,25 @@ impl OmniFluxApp {
             ui.separator();
             let can_split = self.selected_clip_contains_playhead();
             if ui
-                .add_enabled(can_split, egui::Button::new("Split"))
+                .add_enabled(
+                    can_split,
+                    egui::Button::new(RichText::new("Split").color(TEXT_PRIMARY)),
+                )
                 .on_hover_text("Ctrl+K")
                 .clicked()
             {
                 self.split();
             }
+            let delete_color = if self.selected.is_some() {
+                ALERT_RED
+            } else {
+                TEXT_DISABLED
+            };
             if ui
-                .add_enabled(self.selected.is_some(), egui::Button::new("Delete clip"))
+                .add_enabled(
+                    self.selected.is_some(),
+                    egui::Button::new(RichText::new("Delete clip").color(delete_color)),
+                )
                 .on_hover_text("Delete")
                 .clicked()
             {
@@ -625,7 +666,7 @@ impl OmniFluxApp {
                     .unwrap_or("media");
                 ui.label(RichText::new(name).small().weak());
             } else {
-                ui.label(RichText::new("no video open").small().weak());
+                ui.label(RichText::new("no video open").small().color(TEXT_DISABLED));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(
@@ -640,15 +681,22 @@ impl OmniFluxApp {
 
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.label(RichText::new(self.status.as_str()).small());
+            ui.label(
+                RichText::new(self.status.as_str())
+                    .color(TEXT_PRIMARY)
+                    .small(),
+            );
         });
         ui.horizontal(|ui| {
             let timebase = self.project.timeline().timebase();
-            ui.monospace(format!(
-                "{} / {}",
-                time_text::format_clock(timebase.to_seconds(self.playhead)),
-                time_text::format_clock(timebase.to_seconds(self.timeline_span))
-            ));
+            ui.monospace(
+                RichText::new(format!(
+                    "{} / {}",
+                    time_text::format_clock(timebase.to_seconds(self.playhead)),
+                    time_text::format_clock(timebase.to_seconds(self.timeline_span))
+                ))
+                .color(TEXT_PRIMARY),
+            );
             if let Some(media) = &self.media {
                 ui.separator();
                 ui.label(
@@ -659,6 +707,7 @@ impl OmniFluxApp {
                         1.0 / media.info.frame_duration.max(1e-9),
                         media.info.reorder_depth
                     ))
+                    .color(TEXT_SECONDARY)
                     .small(),
                 );
             }
@@ -669,16 +718,25 @@ impl OmniFluxApp {
                         "decode {ms:.1} ms · {} pkt",
                         self.last_decode_packets
                     ))
+                    .color(TEXT_SECONDARY)
                     .small(),
                 );
             }
             if let Some(ms) = self.open_ms {
                 ui.separator();
-                ui.label(RichText::new(format!("open {ms:.0} ms")).small());
+                ui.label(
+                    RichText::new(format!("open {ms:.0} ms"))
+                        .color(TEXT_SECONDARY)
+                        .small(),
+                );
             }
             if let Some(fps) = self.measured_fps {
                 ui.separator();
-                ui.label(RichText::new(format!("play {fps:.1} fps")).small());
+                ui.label(
+                    RichText::new(format!("play {fps:.1} fps"))
+                        .color(TEXT_SECONDARY)
+                        .small(),
+                );
             }
             ui.separator();
             ui.label(
@@ -688,6 +746,7 @@ impl OmniFluxApp {
                     self.history.undo_depth(),
                     self.history.redo_depth()
                 ))
+                .color(TEXT_SECONDARY)
                 .small(),
             );
         });
@@ -748,17 +807,22 @@ impl eframe::App for OmniFluxApp {
         self.advance_playback(&ctx);
         self.upload_frame(&ctx);
 
-        egui::Panel::top("omniflux-toolbar").show(ui, |ui| self.toolbar(ui));
-        egui::Panel::bottom("omniflux-status").show(ui, |ui| self.status_bar(ui));
+        egui::Panel::top("omniflux-toolbar")
+            .frame(egui::Frame::new().fill(BG_TOOLBAR))
+            .show(ui, |ui| self.toolbar(ui));
+        egui::Panel::bottom("omniflux-status")
+            .frame(egui::Frame::new().fill(BG_VIEWPORT))
+            .show(ui, |ui| self.status_bar(ui));
         egui::Panel::bottom("omniflux-timeline")
             .exact_size(150.0)
             .resizable(false)
+            .frame(egui::Frame::new().fill(BG_VIEWPORT))
             .show(ui, |ui| self.timeline_panel(ui));
         egui::CentralPanel::default().show(ui, |ui| self.preview_panel(ui));
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        Color32::from_gray(8).to_normalized_gamma_f32()
+        BG_VIEWPORT.to_normalized_gamma_f32()
     }
 }
 

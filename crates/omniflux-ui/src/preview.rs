@@ -10,6 +10,8 @@
 
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, TextureHandle, Vec2};
 
+use crate::colors::{BG_VIEWPORT, TEXT_DISABLED, TEXT_PRIMARY, TEXT_SECONDARY};
+
 /// Draws the preview area.
 ///
 /// `has_clip` is about the timeline arrangement, not the file: a playhead
@@ -24,29 +26,24 @@ pub fn show(
 ) {
     let (rect, _) = ui.allocate_exact_size(ui.available_size(), Sense::hover());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 0.0, Color32::from_gray(6));
+    painter.rect_filled(rect, 0.0, BG_VIEWPORT);
 
     if !ffmpeg_available {
         centered(
             ui,
             rect,
             "FFmpeg was not found.\n\nSet OMNIFLUX_FFMPEG, put ffmpeg in tools/ffmpeg/bin,\nor install it on PATH.",
-            Color32::from_gray(170),
+            TEXT_SECONDARY,
         );
     } else if !has_media {
         centered(
             ui,
             rect,
             "Drop a video here,\nor type a path in the bar above.",
-            Color32::from_gray(150),
+            TEXT_SECONDARY,
         );
     } else if !has_clip {
-        centered(
-            ui,
-            rect,
-            "No clip at the playhead.",
-            Color32::from_gray(130),
-        );
+        centered(ui, rect, "No clip at the playhead.", TEXT_SECONDARY);
     } else if let Some(texture) = texture {
         let image_size = texture.size_vec2();
         if image_size.x > 0.0 && image_size.y > 0.0 {
@@ -68,7 +65,7 @@ pub fn show(
         Align2::RIGHT_BOTTOM,
         "UI prototype",
         FontId::proportional(10.0),
-        Color32::from_gray(80),
+        TEXT_DISABLED,
     );
 
     if dropping {
@@ -78,7 +75,7 @@ pub fn show(
             Align2::CENTER_CENTER,
             "Drop to open",
             FontId::proportional(24.0),
-            Color32::WHITE,
+            TEXT_PRIMARY,
         );
     }
 }

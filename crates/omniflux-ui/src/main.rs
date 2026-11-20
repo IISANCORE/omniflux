@@ -8,6 +8,7 @@
 //! opening, file dialogs. See README.md for what the engine measures.
 
 mod app;
+mod colors;
 mod edit_actions;
 mod media;
 mod preview;
